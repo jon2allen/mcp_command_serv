@@ -10,7 +10,7 @@ import subprocess
 from typing import Dict, Any, List, Optional
 import tomli # Import tomli to load the config
 import re    # Import re for robust command checking
-import pexpect_auto
+from pexpect_auto import PexpectAutomator
 
 # The user's template uses FastMCP, so we'll import that.
 from fastmcp import FastMCP
@@ -237,6 +237,47 @@ async def change_dir(c_dir: str) -> str:
         # Log the error and return an error message
         logger.info("invalid dir: '%s'", expanded_dir)
         return "error: invalid directory"
+
+@mcp.tool()
+def run_expect_script(
+    program: str,
+    actions: list[dict[str, str]]
+) -> str:
+    """
+    Run a program with a sequence of expect/send actions for programs that are interactive.
+    Programs that require inputs.         
+
+    important:  do not send carriage return or line feed with text on send.
+
+    Args:
+        program: The command to run (e.g. "python3 myscript.py").  Can be any command
+        actions: A list of dicts, e.g. [{"action": "expect", "text": "foo"}, {"action":"send","text":"bar"}]
+
+    Returns:
+        The output from the interaction.
+    """
+    
+    logger.info("running pexpect for pgm : '%s'", program )
+    logger.info("Actions: %s", json.dumps(actions, indent=2))
+
+    # Translate from dicts to your internal format
+    tuple_actions = []
+    for act_d in actions:
+        act = act_d.get("action")
+        text = act_d.get("text")
+        # maybe validate
+        if act not in ("expect", "send"):
+            raise ValueError(f"Invalid action {act}")
+        tuple_actions.append((act, text))
+
+    autom = PexpectAutomator(program, tuple_actions)
+    output = autom.run()
+    if output is None:
+        # You could choose to raise, or return error info
+        raise RuntimeError("PexpectAutomator failed")
+
+    # Optionally log or return structured output
+    return output
 
  
 if __name__ == "__main__":
