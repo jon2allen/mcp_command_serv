@@ -1,0 +1,7 @@
+
+change directory to $HOME
+
+find the the file has 'api' in the filename
+
+list contents  
+

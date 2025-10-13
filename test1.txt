@@ -1,0 +1,10 @@
+
+Change directory to $HOME
+
+change directory to github
+
+change directory to mcptest1
+
+list all files including hidden.  give a summary of size of the directory
+
+Them return to the original dirctory.  print the current working directory
