@@ -57,8 +57,8 @@ resouces:
 | README.md                | Provides a general overview of the project, its purpose, and usage instructions.             |
 | command_cli_enh.py       | A command-line interface (CLI) for interacting with the mcp_command_server_enh.py script.     |
 | config.toml              | Configuration file for the project, likely containing settings for the server and CLI.      |
-| item.py                  | Defines an Item class, likely used to represent items in a list or database.                 |
-| list.py                  | Contains a List class, which appears to be a custom list implementation.                     |
+| item.py                  | random vegetable and fruit generator - used for demonstrarion.                              |
+| list.py                  | command to list mcp tools using list tools                            .                     |
 | mcp_command_server_enh.py| The main command server script that listens for and executes commands.                      |
 | orig.py                  | Appears to be an earlier version or a related script.                                       |
 | pexpect_auto.py          | Uses the pexpect library to automate interactions with another program.                      |
