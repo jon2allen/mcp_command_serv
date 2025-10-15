@@ -48,3 +48,22 @@ This script provides an enhanced command-line interface for interacting with the
 ##############################
 resouces: 
 [Resource(name='system_info', title=None, uri=AnyUrl('resource://system_info'), description='Provides basic information about the host operating system.', mimeType='text/plain', size=None, icons=None, annotations=None, meta={'_fastmcp': {'tags': []}})]
+
+##
+
+| File                     | Purpose                                                                                     |
+|--------------------------|---------------------------------------------------------------------------------------------|
+| LICENSE                  | Contains the MIT License, granting permission to use, copy, modify, and distribute the software. |
+| README.md                | Provides a general overview of the project, its purpose, and usage instructions.             |
+| command_cli_enh.py       | A command-line interface (CLI) for interacting with the mcp_command_server_enh.py script.     |
+| config.toml              | Configuration file for the project, likely containing settings for the server and CLI.      |
+| item.py                  | Defines an Item class, likely used to represent items in a list or database.                 |
+| list.py                  | Contains a List class, which appears to be a custom list implementation.                     |
+| mcp_command_server_enh.py| The main command server script that listens for and executes commands.                      |
+| orig.py                  | Appears to be an earlier version or a related script.                                       |
+| pexpect_auto.py          | Uses the pexpect library to automate interactions with another program.                      |
+| pythagoras.py            | A script related to the Pythagorean theorem, possibly for testing or demonstration.          |
+| test1.txt - test7.txt    | Test promptSs  used for testing the functionality of the scripts.                          |
+| test_float_input.py      | A script for testing floating-point number input.                                           |
+| test_input.py            | A script for testing general input.                                                         |
+
