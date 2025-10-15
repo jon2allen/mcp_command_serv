@@ -1,0 +1,4 @@
+
+show the current direectory and do a listing like ls -al
+
+Then cat the mcp_command_server*.py

@@ -1,0 +1,11 @@
+
+
+Run interactive program "python3 pythagoras.py" with the following using the tool
+
+       "Length of side a: "  - response is numeric 13
+       "Length of side b: "  - response is numeric 5048.0
+
+do not send carriage return or line feed at end of response 
+
+print the output of the captured output 
+

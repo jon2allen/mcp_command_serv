@@ -1,0 +1,21 @@
+#configuration for the MCP Command Server
+[command_blocking]
+# List of command substrings that will be blocked if found in the user's input command.
+prohibited_commands = [
+    "rm ",
+    "mv ",
+    "sudo ",
+    "su ",
+]
+restricted_files = [
+    "mcp_server_command_enh.py",
+    "mcp_server_command.log",
+    "pexpect_auto.py",
+    "config.toml",
+    "mcp_server_command*.py"
+]
+
+# If set to True, all command restrictions are ignored and execution is permitted.
+override = false 
+
+#override = true 

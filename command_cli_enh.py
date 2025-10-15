@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import argparse
 import asyncio
 import os
@@ -43,6 +42,21 @@ async def run_query(prompt_content: str):
             print("--- Response ---")
             print(response.text)
             print("----------------")
+            
+            # --- ADDED: Token Count Display ---
+            # Access the usage metadata from the response to get token counts
+            if response.usage_metadata:
+                input_tokens = response.usage_metadata.prompt_token_count
+                output_tokens = response.usage_metadata.candidates_token_count
+                total_tokens = response.usage_metadata.total_token_count
+                
+                print("--- Token Usage ---")
+                print(f"Input Tokens:  {input_tokens}")
+                print(f"Output Tokens: {output_tokens}")
+                print(f"Total Tokens:  {total_tokens}")
+                print("-------------------")
+            # --- END of ADDED section ---
+
     except Exception as e:
         print(f"An error occurred during the API call: {e}", file=sys.stderr)
 
