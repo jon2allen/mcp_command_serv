@@ -97,8 +97,8 @@ def is_restricted_file_access(command: str) -> bool:
     """Checks if a command involves accessing restricted files."""
     restricted_files = SERVER_CONFIG.get("restricted_files", [])
     for restricted_file in restricted_files:
-        logger.info("restricted1 file %s", restricted_file ) 
-        if restricted_file in command:
+        # logger.info("restricted1 file %s", restricted_file )
+        if command.find(restricted_file) > -1:
             return True
     return False
 

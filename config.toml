@@ -16,6 +16,6 @@ restricted_files = [
 ]
 
 # If set to True, all command restrictions are ignored and execution is permitted.
-override = false 
+override = False 
 
 #override = true 
