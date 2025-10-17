@@ -7,6 +7,7 @@ prohibited_commands = [
     "sudo ",
     "su ",
 ]
+override = False
 restricted_files = [
     "mcp_server_command_enh.py",
     "mcp_server_command.log",
@@ -15,7 +16,4 @@ restricted_files = [
     "mcp_server_command*.py"
 ]
 
-# If set to True, all command restrictions are ignored and execution is permitted.
-override = False 
-
-#override = true 
+# If override set to True, all command restrictions are ignored and execution is permitted.
