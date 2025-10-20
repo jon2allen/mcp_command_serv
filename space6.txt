@@ -1,0 +1,9 @@
+
+create a directory called test26
+
+cd $HOME
+cd test26
+
+prompt the user using permission tool and only continue if 'accept' is given
+
+create a perl program that calculates size of all github repos in user $HOME dir

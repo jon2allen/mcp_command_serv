@@ -1,0 +1,2 @@
+
+determine how much space in the $HOME subdirectory is taken by python libraries

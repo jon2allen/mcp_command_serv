@@ -1,0 +1,7 @@
+
+in the $HOME directory and all subdirs 
+
+determine the number of github repos
+and size of each repo
+
+list directory and size summary of each git repo

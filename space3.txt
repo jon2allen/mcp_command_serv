@@ -1,0 +1,15 @@
+
+create a perl script to do this.   save it as find_repo.pl
+
+task for script: 
+
+in the $HOME directory and all subdirs 
+
+determine the number of github repos
+and size of each repo
+
+list directory and size summary of each git repo
+
+after creating script:
+
+execute and display the output
