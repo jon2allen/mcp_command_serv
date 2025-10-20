@@ -12,7 +12,13 @@ import tomli # Import tomli to load the config
 import re    # Import re for robust command checking
 from pexpect_auto import PexpectAutomator
 # The user's template uses FastMCP, so we'll import that.
-from fastmcp import FastMCP
+from fastmcp import FastMCP,Context
+
+from fastmcp.server.elicitation import (
+    AcceptedElicitation, 
+    DeclinedElicitation, 
+    CancelledElicitation,
+)
 
 # --- Logging setup (from template) ---
 LOG_FILE = "mcp_command_server.log"
@@ -176,7 +182,10 @@ async def run_command(
     stdin: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Run a shell command on the local machine and get the output.
+    Run a shell command on the local machine and get the outpu.
+
+    !important - each time call permission tool and get text 'accept' before proceeding with every command
+                 executed, without fail.  this is a secure machine. 
 
     Args:
         command: The shell command to execute.
@@ -297,6 +306,17 @@ def run_expect_script(
         raise RuntimeError("PexpectAutomator failed")
     # Optionally log or return structured output
     return output
+
+@mcp.tool
+async def permission(ctx: Context) -> str:
+    result = await ctx.elicit("Choose an action - type accept or decline" )
+
+    if result.action == "accept":
+        return "Accepted!"
+    elif result.action == "decline":
+        return "Declined!"
+    else:
+        return "Cancelled!"
 
 if __name__ == "__main__":
     # Load configuration before starting the server

@@ -1,13 +1,58 @@
+#!/usr/local/bin/python3
 import argparse
 import asyncio
 import os
 import sys
 
 from fastmcp import Client
+from fastmcp.client.elicitation import ElicitResult, ElicitRequestParams, RequestContext
 from google import genai
 
+async def handle_permission_elicitation(
+    message: str,
+    response_type: type,
+    params: ElicitRequestParams,
+    context: RequestContext
+) -> ElicitResult:
+    """
+    Handles the elicitation request from the 'permission' tool.
+    It prompts the user and returns an ElicitResult with the chosen action.
+    """
+   
+    print(f"\n--- Permission Request ---")
+    print(f"Server Message: {message}")
+    print("--------------------------")
+   
+    # Use standard input for a CLI environment
+    while True:
+        # Use a non-blocking way to get input in an async function (simulated here)
+        user_input = await asyncio.to_thread(
+            input,
+            "Enter 'accept', 'decline', or 'cancel': "
+        )
+
+        action = user_input.strip().lower()
+
+        if action == "accept":
+            # The server expects either an empty object or a structured response
+            # upon acceptance. Since no specific schema was defined, we accept
+            # with an empty content object to satisfy the protocol.
+            return ElicitResult(action="accept", content={})
+
+        elif action == "decline":
+            # Decline action is sent with no content.
+            return ElicitResult(action="decline")
+
+        elif action == "cancel":
+            # Cancel action is sent with no content.
+            return ElicitResult(action="cancel")
+
+        else:
+            print(f"'{user_input}' is not a valid choice. Try again.")
+
+
 # --- Initialization (Outside main) ---
-mcp_client = Client("./mcp_command_server_enh.py")
+mcp_client = Client("./mcp_command_server_enh.py", elicitation_handler=handle_permission_elicitation)
 # Assuming gemini_client initialization is safe outside the async function
 # and that API key is set via environment variable (e.g., GEMINI_API_KEY)
 try:
@@ -59,6 +104,7 @@ async def run_query(prompt_content: str):
 
     except Exception as e:
         print(f"An error occurred during the API call: {e}", file=sys.stderr)
+
 
 # The original main function is now for argument parsing and setup
 def main():
