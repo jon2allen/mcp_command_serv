@@ -309,6 +309,12 @@ def run_expect_script(
 
 @mcp.tool
 async def permission(ctx: Context) -> str:
+    """
+      Get permission from user for action
+
+      returns "accept" if permission granted
+
+    """
     result = await ctx.elicit("Choose an action - type accept or decline" )
 
     if result.action == "accept":
