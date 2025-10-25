@@ -434,6 +434,7 @@ def list_forms() -> List[str]:
     """
     forms_dir = "forms"
     form_names = []
+    logger.info("list_forms()")
 
     if not os.path.isdir(forms_dir):
         # The 'forms' directory doesn't exist, return an empty list
@@ -467,6 +468,57 @@ def list_forms() -> List[str]:
                 continue
 
     return form_names
+
+
+@mcp.tool()
+def get_form_xml(form_name: str) -> str:
+    """
+    Retrieves the raw XML content for a specific form name from the 'forms' directory.
+
+    The function searches all XML files in the 'forms' directory and matches the 
+    requested name against the 'formName' attribute inside the XML content.
+
+    Args:
+        form_name: The human-readable name of the form (e.g., "Vessel Registration").
+
+    Returns:
+        str: The raw XML content string if the form is found, otherwise 
+             "Error: unable to find form name '<form_name>'."
+    """
+    forms_dir = "forms"
+    logger.info("processing get_form_xml")
+
+    if not os.path.isdir(forms_dir):
+        # Forms directory doesn't exist, treat as not found
+        return f"Error: unable to find form name '{form_name}'."
+
+    # Iterate over all files in the 'forms' directory
+    for filename in os.listdir(forms_dir):
+        if filename.endswith(".xml"):
+            file_path = os.path.join(forms_dir, filename)
+            logger.debug( "processing filename: %s", file_path) 
+            try:
+                # 1. Parse the XML file
+                tree = ET.parse(file_path)
+                root = tree.getroot()
+
+                # 2. Check for a match against the 'formName' attribute
+                xml_form_name = root.get("formName")
+
+                if xml_form_name == form_name:
+                    # Found a match, read and return the full file content
+                    with open(file_path, 'r') as f:
+                        return f.read()
+
+            except ET.ParseError:
+                # Skip invalid XML files
+                continue
+            except Exception:
+                # Skip files with other read errors
+                continue
+
+    # If the loop completes without finding a matching form
+    return f"Error: unable to find form name '{form_name}'."
 
 if __name__ == "__main__":
     # Load configuration before starting the server
