@@ -2,12 +2,84 @@ import argparse
 import asyncio
 import os
 import sys
+from typing import Dict
+from xml.etree import ElementTree as ET
+from xml.dom import minidom
 
-from fastmcp import Client
+
+from fastmcp import Client 
+from fastmcp.client.elicitation import ElicitResult, ElicitRequestParams, RequestContext
 from google import genai
 
+def _handle_form_interaction_and_serialization(form_xml_string: str) -> (Dict[str, str], str):
+    """
+    (The full implementation of the blocking user input and XML serialization logic)
+    ...
+    """
+    # (The function body from the previous accepted answer goes here)
+
+    print("_handle " )
+    try:
+        form_root = ET.fromstring(form_xml_string)
+        form_name = form_root.get("formName", "Unnamed Form")
+
+    except ET.ParseError:
+        print(f"Error: Could not parse XML file '{args.form}'.")
+
+    print(" post ET ")
+
+    captured_values = update_form_std(form_root, form_name)
+ 
+    data_xml = convert_dict_to_xml(captured_values)
+
+    return captured_values, data_xml
+
+async def handle_form_elicitation(
+    message: str,
+    response_type: type,
+    params: ElicitRequestParams,
+    context: RequestContext
+) -> ElicitResult:
+    """
+    Handles the elicitation request from the 'permission' tool.
+    It prompts the user and returns an ElicitResult with the chosen action.
+    """
+
+    print(f"\n--- form  Request ---")
+    print(f"Server Message: {message}")
+    print("--------------------------")
+
+         
+    captured_values, final_xml_string = await asyncio.to_thread(
+        _handle_form_interaction_and_serialization, message
+    )  
+
+    print("_acttion")
+    # action = user_input.strip().lower()
+    action = "accept"
+
+    if action == "accept":
+            # The server expects either an empty object or a structured response
+            # upon acceptance. Since no specific schema was defined, we accept
+            # with an empty content object to satisfy the protocol.
+            print("return accept" )
+            return ElicitResult(action="accept", content=captured_values)
+
+    elif action == "decline":
+            # Decline action is sent with no content.
+            return ElicitResult(action="decline")
+
+    elif action == "cancel":
+        # Cancel action is sent with no content.
+            return ElicitResult(action="cancel")
+
+    else:
+            print(f"'{user_input}' is no")
+
+
+
 # --- Initialization (Outside main) ---
-mcp_client = Client("./mcp_command_server_enh.py")
+mcp_client = Client("./mcp_command_server_enh.py",  elicitation_handler=handle_form_elicitation)
 # Assuming gemini_client initialization is safe outside the async function
 # and that API key is set via environment variable (e.g., GEMINI_API_KEY)
 try:
@@ -16,6 +88,67 @@ except Exception as e:
     # Handle the case where the client cannot be initialized (e.g., no API key)
     print(f"Error initializing Gemini client: {e}", file=sys.stderr)
     sys.exit(1)
+
+def prompt_for_value(field_name, field_type, current_value):
+    """
+    Prompts the user for a single value using standard input.
+    """
+    default = current_value if current_value else ""
+    prompt = f"Enter value for {field_name} ({field_type}) [{default}]: "
+    
+    user_input = input(prompt).strip()
+    
+    if not user_input:
+        return current_value
+    
+    if field_type == "date":
+        try:
+            datetime.strptime(user_input, "%Y-%m-%d")
+            return user_input
+        except ValueError:
+            print("Invalid date format. Please use YYYY-MM-DD.")
+            return prompt_for_value(field_name, field_type, current_value)
+            
+    return user_input
+
+def update_form_std(form_root, form_name):
+    """
+    Iterates over an XML form root, prompting for each field
+    using standard text input.
+    Returns a dictionary of the captured values.
+    """
+    print("\n" + "-" * (len(form_name) + 4))
+    print(f" {form_name} ")
+    print("-" * (len(form_name) + 4))
+    
+    captured_values = {}
+    for field in form_root.findall("Field"):
+        field_name = field.get("name")
+        field_type = field.get("type")
+        current_value = field.text if field.text else ""
+        
+        new_value = prompt_for_value(field_name, field_type, current_value)
+        
+        field.text = new_value
+        captured_values[field_name] = new_value
+        
+    print(f"Form '{form_name}' complete.")
+    return captured_values
+
+def convert_dict_to_xml(data: dict) -> str:
+    """
+    Converts the captured_values dictionary into the
+    XML string the server tool expects.
+    """
+    result_root = ET.Element("result")
+    for key, value in data.items():
+        field_el = ET.SubElement(result_root, key)
+        field_el.text = str(value)
+    
+    return ET.tostring(result_root, encoding="unicode")
+
+
+
 
 async def run_query(prompt_content: str):
     """

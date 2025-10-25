@@ -9,13 +9,22 @@ import argparse
 import subprocess
 from typing import Dict, Any, List, Tuple,Literal,  Optional
 from typing_extensions import TypedDict
+from dataclasses import dataclass, field
 from xml.etree import ElementTree as ET
 from xml.dom import minidom
 import tomli # Import tomli to load the config
 import re    # Import re for robust command checking
+
+# local imports
 from pexpect_auto import PexpectAutomator
-# The user's template uses FastMCP, so we'll import that.
-from fastmcp import FastMCP
+from fastmcp import FastMCP,Context
+from fastmcp.server.context import AcceptedElicitation
+
+from fastmcp.server.elicitation import (
+    AcceptedElicitation, 
+    DeclinedElicitation, 
+    CancelledElicitation,
+)
 
 # --- Logging setup (from template) ---
 LOG_FILE = "mcp_command_server.log"
@@ -519,6 +528,46 @@ def get_form_xml(form_name: str) -> str:
 
     # If the loop completes without finding a matching form
     return f"Error: unable to find form name '{form_name}'."
+
+
+@mcp.tool
+async def elicit_dynamic_form(ctx: Context,  form_xml: str) -> dict:
+    """
+    A generic tool that elicits a response from the user
+    using a provided XML form string.
+    
+    Args:
+        ctx: The FastMCP context.
+        form_xml: A string containing valid  form XML.
+        
+    Returns:
+        an xml of the data collected from the form.
+    """
+    print(f"Eliciting with dynamically provided XML...")
+
+    xml1  = form_xml if form_xml is not None else xml_form
+
+    logger.info("elicit_dynamic_form - " )
+
+    logger.info("form: %s ", xml1 )
+    
+    # 1. Elicit using the 'form_xml' argument
+
+    result: AcceptedElicitation[dict] = await ctx.elicit(message=form_xml, response_type=Dict)
+
+
+    # 2. Ensure action exists (fallback default)
+    #action = getattr(result, "action", "submit")
+    #result = await ctx.elicit(message=form_xml)
+    #result = await ctx.elicit(message="type in accept")
+
+    if result.action == "accept":
+        #return {"status": "success", "data": result.data}
+        return result.data 
+    elif result.action == "decline":
+        return {"status": "declined"}
+    else:
+        return {"status": "cancelled"}
 
 if __name__ == "__main__":
     # Load configuration before starting the server
