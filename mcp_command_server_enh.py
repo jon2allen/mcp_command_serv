@@ -7,7 +7,10 @@ import asyncio
 import logging
 import argparse
 import subprocess
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Tuple,Literal,  Optional
+from typing_extensions import TypedDict
+from xml.etree import ElementTree as ET
+from xml.dom import minidom
 import tomli # Import tomli to load the config
 import re    # Import re for robust command checking
 from pexpect_auto import PexpectAutomator
@@ -17,7 +20,7 @@ from fastmcp import FastMCP
 # --- Logging setup (from template) ---
 LOG_FILE = "mcp_command_server.log"
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(sys.stderr), # Log to stderr for visibility
@@ -297,6 +300,173 @@ def run_expect_script(
         raise RuntimeError("PexpectAutomator failed")
     # Optionally log or return structured output
     return output
+
+class FormField(TypedDict):
+    """Defines the structure for a single field in the form."""
+    name: str
+    type: Literal["string", "date", "float", "decimal", "integer"]
+
+
+@mcp.tool()
+def create_form(
+    form_name: str,
+    #fields: List[Tuple[str, Literal["string", "date", "float", "decimal", "integer"]]]
+    fields: List[FormField] 
+) -> str:
+    """
+    Creates an XML form file based on the provided schema.
+
+    schema definition:
+
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="Form">
+    <xs:complexType>
+      <xs:sequence>
+        <!-- Generic Field element with name and type attributes -->
+        <xs:element name="Field" minOccurs="0" maxOccurs="unbounded">
+          <xs:complexType>
+            <xs:simpleContent>
+              <xs:extension base="xs:string">
+                <xs:attribute name="name" type="xs:string" use="required"/>
+                <xs:attribute name="type" use="required">
+                  <xs:simpleType>
+                    <xs:restriction base="xs:string">
+                      <xs:enumeration value="string"/>
+                      <xs:enumeration value="date"/>
+                      <xs:enumeration value="float"/>
+                      <xs:enumeration value="decimal"/>
+                      <xs:enumeration value="integer"/>
+                    </xs:restriction>
+                  </xs:simpleType>
+                </xs:attribute>
+              </xs:extension>
+            </xs:simpleContent>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+      <!-- Add a 'formName' attribute to the Form element -->
+      <xs:attribute name="formName" type="xs:string" use="required"/>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>
+
+
+    Args:
+        form_name: Name of the form (without extension).
+        fields: List of tuples, each containing (field_name, field_type).
+
+    Returns:
+        str: "Form <form_name> created" or "Error: form not created".
+    """
+    # Validate field types
+
+    valid_types = {"string", "date", "float", "decimal", "integer"}
+    for field_data in fields:
+        name = field_data["name"]
+        type_ = field_data["type"]
+        
+        if type_ not in valid_types:
+            # 1. Log: Invalid Field Type
+            logger.error(f"Validation failed for form '{form_name}'. Invalid field type: '{type_}' for field '{name}'.")
+            return "Error: form not created"
+
+    # 2. Log: Form Creation Start
+    logger.info(f"Starting creation of form: '{form_name}' with {len(fields)} fields.")
+    
+    # Create the root element
+    form = ET.Element("Form", {"formName": form_name})
+
+    # Add fields
+    for field_data in fields:
+        name = field_data["name"]
+        type_ = field_data["type"]
+        
+        field = ET.SubElement(form, "Field", {"name": name, "type": type_})
+        
+        # 3. Log: Successful Field Addition
+        logger.debug(f"Added field '{name}' (Type: {type_}) to form '{form_name}'.")
+
+    # Create the XML tree (This step doesn't usually require logging)
+    tree = ET.ElementTree(form)
+
+    # Convert to a pretty-printed XML string
+    xml_str = ET.tostring(form, encoding="utf-8")
+    xml_pretty = minidom.parseString(xml_str).toprettyxml(indent="  ")
+
+    # Ensure the forms directory exists
+    # os.makedirs will log an INFO message if a new directory is created
+    try:
+        os.makedirs("forms", exist_ok=True)
+        # 4. Log: Successful Directory Creation (only logs if it was necessary)
+        logger.info("Checked/created 'forms' output directory.")
+    except Exception as e:
+         # Optional: Log if os.makedirs fails for some permission reason
+        logger.error(f"Failed to ensure 'forms' directory exists: {e}")
+        return "Error: form not created"
+
+
+    # Write to file
+    filename = f"forms/{form_name}_form.xml"
+    try:
+        with open(filename, "w") as f:
+            f.write(xml_pretty)
+        
+        # 5. Log: Successful File Write
+        logger.info(f"Successfully saved XML form to file: {filename}")
+        return f"Form {form_name} created"
+        
+    except Exception as e:
+        # 6. Log: File Writing Error
+        logger.error(f"Failed to write form '{form_name}' to file '{filename}'. Error: {e}")
+        return "Error: form not created"
+
+@mcp.tool() 
+def list_forms() -> List[str]:
+    """
+    Lists the names of all forms found in the 'forms' directory. 
+    The name is extracted from the 'formName' attribute within the XML file 
+    rather than using the file name.
+
+    Returns:
+        List[str]: A list of human-readable form names. Returns an empty 
+                   list if the 'forms' directory doesn't exist or is empty.
+    """
+    forms_dir = "forms"
+    form_names = []
+
+    if not os.path.isdir(forms_dir):
+        # The 'forms' directory doesn't exist, return an empty list
+        return []
+
+    # Iterate over all files in the 'forms' directory
+    for filename in os.listdir(forms_dir):
+        if filename.endswith(".xml"):
+            file_path = os.path.join(forms_dir, filename)
+            
+            # Attempt to parse the XML file
+            try:
+                tree = ET.parse(file_path)
+                root = tree.getroot()
+                
+                # Check for the required 'formName' attribute on the root element (<Form>)
+                form_name = root.get("formName")
+                
+                if form_name:
+                    form_names.append(form_name)
+                # Note: We could log a warning if 'formName' is missing, but for simplicity, 
+                # we just skip it if it's not found.
+
+            except ET.ParseError:
+                # Handle case where file is not valid XML
+                # print(f"Warning: Could not parse XML file {filename}")
+                continue
+            except Exception:
+                # Handle other file read errors
+                # print(f"Warning: Error reading file {filename}")
+                continue
+
+    return form_names
 
 if __name__ == "__main__":
     # Load configuration before starting the server
