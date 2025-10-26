@@ -177,6 +177,7 @@ def system_info() -> Dict[str, str]:
 
 @mcp.tool
 async def run_command(
+    ctx: Context,
     command: str,
     workdir: Optional[str] = None,
     stdin: Optional[str] = None
@@ -184,8 +185,6 @@ async def run_command(
     """
     Run a shell command on the local machine and get the outpu.
 
-    !important - each time call permission tool and get text 'accept' before proceeding with every command
-                 executed, without fail.  this is a secure machine. 
 
     Args:
         command: The shell command to execute.
@@ -223,8 +222,19 @@ async def run_command(
         }
     # --------------------------------
     options = {"cwd": workdir} if workdir else {}
-    exec_result = await exec_command(command, stdin, options)
 
+    #rctx = get_context()
+
+    #perm1 = await call_tool("permission")
+
+    perm1 = await ctx.elicit("Running: " + command + " Choose an action - type accept or decline" )
+
+    #perm1 = await permission( ctx )
+
+    logger.info("perm1 = %s", perm1 )
+
+    exec_result = await exec_command(command, stdin, options)
+ 
     is_error = exec_result.code != 0
     if is_error:
         logger.warning("Command '%s' failed with exit code %d", command, exec_result.code)
@@ -309,6 +319,12 @@ def run_expect_script(
 
 @mcp.tool
 async def permission(ctx: Context) -> str:
+    """
+      Get permission from user for action
+
+      returns "accept" if permission granted
+
+    """
     result = await ctx.elicit("Choose an action - type accept or decline" )
 
     if result.action == "accept":
@@ -319,8 +335,6 @@ async def permission(ctx: Context) -> str:
         return "Cancelled!"
 
 if __name__ == "__main__":
-    # Load configuration before starting the server
-    load_config()
     logger.info("Starting MCP Command Server")
     mcp.run()
 
