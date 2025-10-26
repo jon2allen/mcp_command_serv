@@ -237,6 +237,7 @@ async def run_command(
         "is_error": is_error
     }
 
+
 @mcp.tool
 async def get_current_dir() -> str:
     """
@@ -529,6 +530,32 @@ def get_form_xml(form_name: str) -> str:
     # If the loop completes without finding a matching form
     return f"Error: unable to find form name '{form_name}'."
 
+@mcp.tool
+async def display_info( ctx: Context, info: str ) -> str:
+   """
+     Generic information display tool to force client to display content request
+     Important - please format for terminal viewing.  Carriage returns
+     and spaces
+
+     parms:  
+          ctx;  The FastMCP context
+          info - the text to be displayed
+
+   """
+   logger.info("display_info")
+
+   data1 = "Display: \n" + info
+
+   result: AcceptedElicitation[dict] = await ctx.elicit( message=data1, response_type=Dict)
+
+   if result.action == "accept":
+       #return {"status": "success", "data": result.data}
+       return "display_info is sucessful"  
+   elif result.action == "decline":
+       return {"status": "declined"}
+   else:
+       return {"status": "cancelled"}
+ 
 
 @mcp.tool
 async def elicit_dynamic_form(ctx: Context,  form_xml: str) -> dict:
@@ -553,7 +580,7 @@ async def elicit_dynamic_form(ctx: Context,  form_xml: str) -> dict:
     
     # 1. Elicit using the 'form_xml' argument
 
-    result: AcceptedElicitation[dict] = await ctx.elicit(message=form_xml, response_type=Dict)
+    result: AcceptedElicitation[dict] = await ctx.elicit( message=form_xml, response_type=Dict)
 
 
     # 2. Ensure action exists (fallback default)

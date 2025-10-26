@@ -11,6 +11,15 @@ from fastmcp import Client
 from fastmcp.client.elicitation import ElicitResult, ElicitRequestParams, RequestContext
 from google import genai
 
+def _handle_display_request( msg: str ):
+    """
+      subroutine to format message request
+    """
+
+    print(msg)
+
+
+
 def _handle_form_interaction_and_serialization(form_xml_string: str) -> (Dict[str, str], str):
     """
     (The full implementation of the blocking user input and XML serialization logic)
@@ -44,6 +53,11 @@ async def handle_form_elicitation(
     Handles the elicitation request from the 'permission' tool.
     It prompts the user and returns an ElicitResult with the chosen action.
     """
+    if message.startswith("Display: "):
+        print("Display request" )
+        _handle_display_request( message )
+
+        return ElicitResult(action="accept", content={"printed": True} )
 
     print(f"\n--- form  Request ---")
     print(f"Server Message: {message}")
