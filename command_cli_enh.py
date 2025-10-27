@@ -27,7 +27,7 @@ def _handle_form_interaction_and_serialization(form_xml_string: str) -> (Dict[st
     """
     # (The function body from the previous accepted answer goes here)
 
-    print("_handle " )
+    #  print("_handle " )
     try:
         form_root = ET.fromstring(form_xml_string)
         form_name = form_root.get("formName", "Unnamed Form")
@@ -35,7 +35,7 @@ def _handle_form_interaction_and_serialization(form_xml_string: str) -> (Dict[st
     except ET.ParseError:
         print(f"Error: Could not parse XML file '{args.form}'.")
 
-    print(" post ET ")
+    #print(" post ET ")
 
     captured_values = update_form_std(form_root, form_name)
  
@@ -60,7 +60,7 @@ async def handle_form_elicitation(
         return ElicitResult(action="accept", content={"printed": True} )
 
     print(f"\n--- form  Request ---")
-    print(f"Server Message: {message}")
+    #  debug - print(f"Server Message: {message}")
     print("--------------------------")
 
          
@@ -68,7 +68,7 @@ async def handle_form_elicitation(
         _handle_form_interaction_and_serialization, message
     )  
 
-    print("_acttion")
+    # print("_acttion")
     # action = user_input.strip().lower()
     action = "accept"
 
@@ -103,13 +103,35 @@ except Exception as e:
     print(f"Error initializing Gemini client: {e}", file=sys.stderr)
     sys.exit(1)
 
+def format_prompt_old(field_name, field_type):
+    # Calculate the number of '=' signs needed to reach the 30th character
+    prompt_text = f"Enter value for {field_name} ({field_type}) "
+    num_equals = 30 - len(prompt_text) - len(" => ")
+    equals_signs = '=' * num_equals
+    return f"{prompt_text}{equals_signs} => "
+
+
+def format_prompt(field_name, field_type):
+    prompt_text = f"Enter value for {field_name} ({field_type})"
+    num_equals = 50 - len(prompt_text) - 1  # -1 for the '>'
+    equals_signs = '=' * num_equals
+    return f"{prompt_text}{equals_signs}>" 
+
 def prompt_for_value(field_name, field_type, current_value):
     """
     Prompts the user for a single value using standard input.
     """
     default = current_value if current_value else ""
-    prompt = f"Enter value for {field_name} ({field_type}) [{default}]: "
+    # prompt = f"Enter value for {field_name} ({field_type}) [{default}]: "
+    # prompt = f"Enter value for {field_name} ({field_type}) ===> "
     
+    #prompt = f"Enter value for {field_name} ({field_type}) ===> {'' :<30}"
+
+    #prompt = f"Enter value for {field_name} ({field_type})".ljust(30) + " ===> "
+
+    prompt = format_prompt( field_name, field_type ) 
+
+ 
     user_input = input(prompt).strip()
     
     if not user_input:
@@ -134,6 +156,8 @@ def update_form_std(form_root, form_name):
     print("\n" + "-" * (len(form_name) + 4))
     print(f" {form_name} ")
     print("-" * (len(form_name) + 4))
+ 
+    print("=" * 50)
     
     captured_values = {}
     for field in form_root.findall("Field"):
@@ -145,6 +169,8 @@ def update_form_std(form_root, form_name):
         
         field.text = new_value
         captured_values[field_name] = new_value
+
+    print("=" * 50)
         
     print(f"Form '{form_name}' complete.")
     return captured_values
