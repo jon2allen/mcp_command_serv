@@ -1,0 +1,9 @@
+create a form called house
+
+fields:
+
+1.  street address as string
+2.  square feet as integer
+3.  stories as interger
+4.  days on market as integer
+5.  zipcode as string

@@ -1,0 +1,3 @@
+create a form called boat
+
+field names make, model, length, beam,propulsion    

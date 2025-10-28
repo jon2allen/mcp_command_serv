@@ -1,0 +1,14 @@
+
+You are an expert in algorithms
+
+using the display_info tool
+
+   You will descirbe 5 different implementations in python of fibinacci, before making any tool calls.
+
+   list them out 1 through 5.
+
+then create a form to ask the user which one they want.
+
+make a directory called fib01, if it exists use it.
+
+and write out the program which the user chose in that directory.  call it fibo.py

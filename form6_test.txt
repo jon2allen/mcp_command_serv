@@ -1,0 +1,12 @@
+
+follow the steps in order!
+
+
+1. using the display_info tool, describe the 5 different implementations of fibinacci.
+
+2. Create a form called fibo_input
+
+3. use the form to ask the user which of he one you want to create
+
+
+4. create the program in fib01 directory

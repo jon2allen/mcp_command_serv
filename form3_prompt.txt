@@ -1,0 +1,4 @@
+
+Use boat form to get input 
+
+List boats of similar lenght to this boats of the same propulsion type

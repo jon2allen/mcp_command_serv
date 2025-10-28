@@ -77,7 +77,7 @@ class ExecResult:
         self.code = code
 
 # --- FUNCTION FOR COMMAND BLOCKING ---
-def is_command_blocked(command: str) -> bool:
+def is_command_blocked_old(command: str) -> bool:
     """Checks if a command contains prohibited substrings loaded from config."""
     prohibited_cmds = SERVER_CONFIG.get("command_blocking", {}).get("prohibited_commands", [])
 
@@ -104,6 +104,39 @@ def is_command_blocked(command: str) -> bool:
             return True
 
     return False
+
+import re
+
+def is_command_blocked(command: str) -> bool:
+    """Checks if a command contains prohibited whole words loaded from config."""
+    prohibited_cmds = SERVER_CONFIG.get("command_blocking", {}).get("prohibited_commands", [])
+    if not prohibited_cmds:
+        return False
+
+    # Prepare list for robust checking (e.g., just 'rm', 'mv')
+    cleaned_prohibited = [cmd.strip() for cmd in prohibited_cmds]
+    if not cleaned_prohibited:
+        return False
+
+    # Pattern to catch whole words only, followed by space or dash (e.g., 'rm -rf')
+    pattern = r'\b(' + '|'.join(re.escape(cmd) for cmd in cleaned_prohibited) + r')\b[\s-]'
+
+    # Check command parts (for 'command1 && command2')
+    command_parts = re.split(r'[;&|]+', command)
+    command_lower = command.lower()
+
+    for part in command_parts:
+        # Check against the robust regex pattern
+        if re.search(pattern, part.strip().lower()):
+            return True
+
+    # 2. Check the original strict match (whole words only)
+    for block in prohibited_cmds:
+        if re.search(rf'\b{re.escape(block)}\b', command_lower):
+            return True
+
+    return False
+
 
 def is_restricted_file_access(command: str) -> bool:
     """Checks if a command involves accessing restricted files."""

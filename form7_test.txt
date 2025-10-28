@@ -1,0 +1,17 @@
+important - folllow all of the steps
+
+1.  Create a form to gather topic, length of passage in words, style
+
+    important - remember the topic, lenght of passage in words, and style for later in converstaion.  
+    We are calling several tools.
+
+2.  use the display_info tool to give a 5 or 6 sentence summary or paraphrase of what the story will be about. 
+
+3.  ask to write the story using a form requesting to continue
+
+
+4.  Create the complete story from the topic, length of passage and style gathered above 
+
+Important use 'cat' freebsd command to create text, echo will fail
+
+5.  write the text of the story in a directory called stories.
