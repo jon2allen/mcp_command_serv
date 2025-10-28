@@ -7,7 +7,7 @@ prohibited_commands = [
     "sudo ",
     "su ",
 ]
-override = False
+override = false
 restricted_files = [
     "mcp_server_command_enh.py",
     "mcp_server_command.log",
