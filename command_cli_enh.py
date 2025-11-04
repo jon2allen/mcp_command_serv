@@ -1,3 +1,5 @@
+import logging
+import json
 import argparse
 import asyncio
 import os
@@ -10,6 +12,21 @@ from xml.dom import minidom
 from fastmcp import Client 
 from fastmcp.client.elicitation import ElicitResult, ElicitRequestParams, RequestContext
 from google import genai
+
+
+# suppress warnting
+# Define a filter class to check the message content
+class NoNonTextPartWarning(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        # Return False if the message contains the specific warning text
+        if "there are non-text parts in the response" in message:
+            return False
+        return True
+
+# Apply the filter to the logger used by the Gemini SDK (google_genai.types)
+logging.getLogger("google_genai.types").addFilter(NoNonTextPartWarning())
+
 
 def _handle_display_request( msg: str ):
     """
@@ -215,7 +232,25 @@ async def run_query(prompt_content: str):
             print("--- Response ---")
             print(response.text)
             print("----------------")
-            
+
+            full_content_parts = response.candidates[0].content.parts
+
+            # uncomment to get full repsonse or view it in json format 
+            try:
+                response_dict = response.to_dict() 
+    
+                #pretty_json = json.dumps(response_dict, indent=4)
+    
+                #print("\n--- FULL RESPONSE OBJECT (Pretty Printed) ---")
+                #print(pretty_json)
+    
+            except AttributeError:
+                # Fallback if the object doesn't have a .to_dict() method
+                #print("\n--- FULL RESPONSE OBJECT (Direct Print Fallback) ---")
+                # This might not be as clean, but shows the structure
+                pass
+                #print(response)
+
             # --- ADDED: Token Count Display ---
             # Access the usage metadata from the response to get token counts
             if response.usage_metadata:
