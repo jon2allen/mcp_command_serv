@@ -354,7 +354,8 @@ class FormField(TypedDict):
 def create_form(
     form_name: str,
     #fields: List[Tuple[str, Literal["string", "date", "float", "decimal", "integer"]]]
-    fields: List[FormField] 
+    #fields: List[FormField]
+    fields: list[dict[Literal["name", "type"], str]] 
 ) -> str:
     """
     Creates an XML form file based on the provided schema.
