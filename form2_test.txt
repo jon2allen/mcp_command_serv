@@ -1,4 +1,4 @@
 
-Use house form to get input 
+list forms and Use house form to get input 
 
-search on internet to find what state this house is in
+search on internet with api and curl openstreetmap.org to find what state this house is in
