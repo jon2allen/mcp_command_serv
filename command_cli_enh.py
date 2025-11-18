@@ -218,7 +218,7 @@ async def run_query(prompt_content: str):
         async with mcp_client:
             # The only change here is replacing the hardcoded string with the variable
             response = await gemini_client.aio.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 contents=prompt_content,  # Use the dynamic prompt
                 config=genai.types.GenerateContentConfig(
                     temperature=0,
