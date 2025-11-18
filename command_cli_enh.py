@@ -4,12 +4,12 @@ import argparse
 import asyncio
 import os
 import sys
-from typing import Dict
+from typing import Dict, Optional, Any
 from xml.etree import ElementTree as ET
 from xml.dom import minidom
 
 
-from fastmcp import Client 
+from fastmcp import Client
 from fastmcp.client.elicitation import ElicitResult, ElicitRequestParams, RequestContext
 from google import genai
 
@@ -34,7 +34,6 @@ def _handle_display_request( msg: str ):
     """
 
     print(msg)
-
 
 
 def _handle_form_interaction_and_serialization(form_xml_string: str) -> (Dict[str, str], str):
@@ -80,7 +79,7 @@ async def handle_form_elicitation(
     #  debug - print(f"Server Message: {message}")
     print("--------------------------")
 
-         
+            
     captured_values, final_xml_string = await asyncio.to_thread(
         _handle_form_interaction_and_serialization, message
     )  
@@ -106,7 +105,6 @@ async def handle_form_elicitation(
 
     else:
             print(f"'{user_input}' is no")
-
 
 
 # --- Initialization (Outside main) ---
@@ -205,8 +203,6 @@ def convert_dict_to_xml(data: dict) -> str:
     return ET.tostring(result_root, encoding="unicode")
 
 
-
-
 async def run_query(prompt_content: str):
     """
     Core async function to interact with FastMCP and Gemini.
@@ -222,7 +218,7 @@ async def run_query(prompt_content: str):
         async with mcp_client:
             # The only change here is replacing the hardcoded string with the variable
             response = await gemini_client.aio.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-2.0-flash",
                 contents=prompt_content,  # Use the dynamic prompt
                 config=genai.types.GenerateContentConfig(
                     temperature=0,
@@ -268,6 +264,109 @@ async def run_query(prompt_content: str):
     except Exception as e:
         print(f"An error occurred during the API call: {e}", file=sys.stderr)
 
+
+def remove_json_literal_wrapper(text: str) -> str:
+    """
+    Removes Markdown code fences (e.g., ```json...```) that wrap 
+    the intended JSON content in the model's response.
+    """
+    # 1. Strip leading/trailing whitespace
+    stripped_text = text.strip()
+
+    # 2. Check for starting code fence
+    if stripped_text.startswith("```"):
+        # Find the end of the language identifier (e.g., "```json\n")
+        first_newline_index = stripped_text.find('\n')
+        
+        # Determine the start of the actual JSON content
+        if first_newline_index != -1:
+            # Start after the first newline following the ```json
+            json_start = first_newline_index + 1
+        else:
+            # Fallback: assume the fence ends right after "```json"
+            json_start = stripped_text.find('```') + 3 # Should be at least 3
+            # A more robust check might look for "```json" and start after it.
+            if stripped_text.lower().startswith("```json"):
+                 json_start = 7 # Length of "```json\n"
+
+        # 3. Find the closing code fence (```) from the end
+        if stripped_text.endswith("```"):
+            json_end = stripped_text.rfind("```")
+            
+            # 4. Extract the content between the fences
+            return stripped_text[json_start:json_end].strip()
+
+    # If no wrapper is found, return the stripped text as is
+    return stripped_text
+
+async def run_plan_query(prompt_content: str, plan_file: str):
+    """
+    Async function to interact with Gemini to generate a JSON plan.
+    It adds a system instruction to force JSON output of the planned tool calls.
+    """
+    if not prompt_content:
+        print("Error: Prompt content is empty.", file=sys.stderr)
+        return
+
+    # New system instruction to enforce plan generation and JSON format
+    system_instruction = (
+        "You are an expert planning system. Your task is to generate a detailed, "
+        "step-by-step plan in **JSON format only** for the user's request, using the available tools. "
+        "The JSON must be an array of objects, where each object has 'step', 'goal', 'tool', 'input', and 'check' keys. "
+        "DO NOT execute the tools, and DO NOT include any explanatory text, markdown outside of the JSON block, or preamble."
+        "The model is expecting a single JSON array object in the response. **Only output the JSON array **"
+    )
+
+    print(f"Generating plan for: '{prompt_content[:80]}...'")
+
+    try:
+        async with mcp_client:
+            response = await gemini_client.aio.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt_content,
+                config=genai.types.GenerateContentConfig(
+                    temperature=0,
+                    tools=[mcp_client.session],
+                    system_instruction=system_instruction, # Add the new instruction
+                ),
+            )
+            
+            # The response.text should be the pure JSON string
+            plan_json_string =  remove_json_literal_wrapper(response.text.strip())
+            
+            # Sanity check and parse the JSON
+            try:
+                plan_data = json.loads(plan_json_string)
+            except json.JSONDecodeError as e:
+                print(f"Error: Could not decode JSON plan from model response: {e}", file=sys.stderr)
+                # Print the raw text for debugging
+                print("\n--- RAW MODEL RESPONSE (for debugging) ---")
+                print(plan_json_string)
+                print("------------------------------------------")
+                return
+
+            # Write the plan to the specified file
+            with open(plan_file, 'w') as f:
+                json.dump(plan_data, f, indent=4)
+            
+            print(f"Plan successfully generated and saved to **{plan_file}**")
+            
+            # --- ADDED: Token Count Display (similar to run_query) ---
+            if response.usage_metadata:
+                input_tokens = response.usage_metadata.prompt_token_count
+                output_tokens = response.usage_metadata.candidates_token_count
+                total_tokens = response.usage_metadata.total_token_count
+                
+                print("--- Token Usage ---")
+                print(f"Input Tokens:  {input_tokens}")
+                print(f"Output Tokens: {output_tokens}")
+                print(f"Total Tokens:  {total_tokens}")
+                print("-------------------")
+            # --- END of ADDED section ---
+
+    except Exception as e:
+        print(f"An error occurred during the API call: {e}", file=sys.stderr)
+
 # The original main function is now for argument parsing and setup
 def main():
     parser = argparse.ArgumentParser(
@@ -286,6 +385,14 @@ def main():
         type=str,
         help="Path to a text file containing the prompt."
     )
+    
+    # --- ADDED: The new --plan argument ---
+    parser.add_argument(
+        "--plan",
+        action="store_true",
+        help="Generate a JSON execution plan (.plan extension) without executing the tools."
+    )
+    # --- END of ADDED argument ---
 
     args = parser.parse_args()
     prompt_content = None
@@ -303,10 +410,24 @@ def main():
             print(f"Error reading file '{args.file}': {e}", file=sys.stderr)
             sys.exit(1)
 
-    # Run the async core function
-    # Note: It's better to wrap the asyncio.run in a try/except block for clean shutdown
+    # --- ADDED: Logic to handle --plan or normal execution ---
     try:
-        asyncio.run(run_query(prompt_content))
+        if args.plan:
+            # Determine the output file name
+            if args.prompt:
+                # Use a simplified name based on the prompt content
+                plan_file_name = "cli_plan.plan"
+            elif args.file:
+                # Use the prompt filename with a .plan extension
+                base_name = os.path.splitext(args.file)[0]
+                plan_file_name = f"{base_name}.plan"
+                
+            asyncio.run(run_plan_query(prompt_content, plan_file_name))
+        else:
+            # Normal execution
+            asyncio.run(run_query(prompt_content))
+    # --- END of ADDED logic ---
+            
     except KeyboardInterrupt:
         print("\nOperation cancelled by user.", file=sys.stderr)
         sys.exit(1)
