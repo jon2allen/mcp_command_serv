@@ -13,6 +13,168 @@ from fastmcp import Client
 from fastmcp.client.elicitation import ElicitResult, ElicitRequestParams, RequestContext
 from google import genai
 
+from list import format_tools_for_print
+
+async def mcp_router(
+    tool_name: str,
+    parameters: Dict[str, Any],
+    mcp_client: Client
+) -> Any:
+    """
+    Routes a tool call to the MCP server using a pre-initialized client and returns the response.
+
+    Args:
+        tool_name: Name of the tool to call (e.g., "change_dir").
+        parameters: Dictionary of parameters for the tool (e.g., {"c_dir": "/path/to/dir"}).
+        mcp_client: Pre-initialized MCPClient instance.
+
+    Returns:
+        Response from the tool or an error message.
+
+    Raises:
+        ValueError: If the tool_name or parameters are invalid.
+    """
+    async with mcp_client:
+       try:
+           # Call the tool and await the response
+           response = await mcp_client.call_tool(
+               name=tool_name,
+               arguments=parameters
+               )
+           return response
+       except Exception as e:
+           return f"Error calling tool '{tool_name}': {str(e)}"
+
+async def execute_plan_steps(
+    json_file_path: str,
+    client: Client,  # Use the imported Client class
+) -> Any:
+    """
+    Reads a JSON file containing a sequence of steps, extracts the tool name and parameters,
+    and calls `mcp_router` for each step using the provided FastMCP client.
+
+    Args:
+        json_file_path: Path to the JSON file containing the steps.
+        client: Pre-initialized FastMCP Client instance.
+
+    Returns:
+        List of dictionaries containing the tool name, parameters, and response for each step.
+
+    Raises:
+        ValueError: If the JSON file is invalid or missing required fields.
+        FileNotFoundError: If the JSON file does not exist.
+    """
+
+    prompt_history = ""
+    try:
+        # Read the JSON file
+        with open(json_file_path, "r") as file:
+            steps = json.load(file)
+
+        # Validate the JSON structure
+        if not isinstance(steps, list):
+            raise ValueError("JSON file must contain a list of steps.")
+
+        results = []
+
+        # Iterate over each step and call mcp_router
+        for step in steps:
+            if not isinstance(step, dict):
+                raise ValueError("Each step must be a dictionary.")
+
+            tool_name = step.get("tool")
+            parameters = step.get("input", {})
+            goal = step.get("goal")
+            check = step.get("check")
+
+            if not tool_name:
+                raise ValueError("Each step must contain a 'tool_name' field.")
+
+            # Call mcp_router for the current step
+            response = await mcp_router(
+                tool_name=tool_name,
+                parameters=parameters,
+                mcp_client=client
+            )
+
+            if tool_name == "display_info":
+                continue
+
+            step_prompt_content = (
+               "Check response against goal"
+               "Goal: \n"
+               f"{goal}"
+               "Response: \n"
+               f"{response}"
+               "important: \n"
+               "produce summary of goal met and reports requested"
+               "if there is data returned print it as is"
+               "check this for any highlevel analysis needed and show any qualitative review of results requested, that are not simple commands"
+               "Do not do qualitative review or highlevel analysis of commands marked Simple Commands"
+               f"{check}"
+               "prior history of execution for reference: "
+               f"{prompt_history}"               
+               "if tool call resulted in an error print ***ERROR***" 
+            )
+
+
+            async with mcp_client:
+                step_response = await gemini_client.aio.models.generate_content(
+                   #model="gemini-2.5-flash",
+                   model="gemma-3-27b-it",
+                   contents=step_prompt_content,
+                   config=genai.types.GenerateContentConfig(
+                    temperature=0,
+                    # tools=[mcp_client.session],
+                    # system_instruction=system_instruction, # Add the new instruction
+                    # response_mime_type="application/json"
+                ),
+            )
+            # print("step_prompt_content: ", step_prompt_content )
+            print("step response: ", step_response.text )
+
+            # Store the result
+            results.append({
+                "tool_name": tool_name,
+                "parameters": parameters,
+                "response": response 
+            })
+            prompt_history = prompt_history + step_response.text + "\n"
+
+        return results
+
+    except FileNotFoundError:
+        raise FileNotFoundError(f"JSON file not found: {json_file_path}")
+    except json.JSONDecodeError:
+        raise ValueError(f"Invalid JSON file: {json_file_path}")
+
+async def list_mcp_tools(client):
+    """
+    Run basic operations with an MCP client and return the results
+    as a formatted string.
+    """
+    async with client:
+        # Basic server interaction
+        await client.ping()
+        
+        # List available operations
+        tools = await client.list_tools()
+        resources = await client.list_resources()
+        prompts = await client.list_prompts()
+
+        formatted_tools = format_tools_for_print(tools)
+
+        # Build the returned string
+        output = []
+        output.append("START OF TOOLS\n")
+        output.append(formatted_tools)
+#        output.append("resources:")
+#        output.append(str(resources))
+#        output.append("prompts:")
+#       output.append(str(prompts))
+        output.append("END OF TOOLS\n")
+
+        return "\n".join(output)
 
 # suppress warnting
 # Define a filter class to check the message content
@@ -107,10 +269,11 @@ async def handle_form_elicitation(
             print(f"'{user_input}' is no")
 
 
-# --- Initialization (Outside main) ---
+# --- Initialization ---
+# define mcp_client
+#######################
 mcp_client = Client("./mcp_command_server_enh.py",  elicitation_handler=handle_form_elicitation)
-# Assuming gemini_client initialization is safe outside the async function
-# and that API key is set via environment variable (e.g., GEMINI_API_KEY)
+#######################
 try:
     gemini_client = genai.Client()
 except Exception as e:
@@ -308,26 +471,43 @@ async def run_plan_query(prompt_content: str, plan_file: str):
         print("Error: Prompt content is empty.", file=sys.stderr)
         return
 
+    # get list in text form 
+    mcp_tools = await list_mcp_tools(mcp_client)
+
+   
     # New system instruction to enforce plan generation and JSON format
-    system_instruction = (
+    plan_prompt_content = (
+        "Purpose and output INSTRUCTIONS: \n"
         "You are an expert planning system. Your task is to generate a detailed, "
-        "step-by-step plan in **JSON format only** for the user's request, using the available tools. "
+        "step-by-step plan in **JSON format only** for the user's request, using the list of available tools listed below: \n "
         "The JSON must be an array of objects, where each object has 'step', 'goal', 'tool', 'input', and 'check' keys. "
+        "the 'input' should correspond to MCP specifications for parameters ( a dictionary )"
+        "for commands that are simple and do not display output, prefix ***Simple command: *** in check text"
         "DO NOT execute the tools, and DO NOT include any explanatory text, markdown outside of the JSON block, or preamble."
         "The model is expecting a single JSON array object in the response. **Only output the JSON array **"
+        "if there is more than one logical ask in a line or sentence break it out 2 steps - such as list and then summarize"
+        "if you know the information or does not require tool, just use info tool to display"
+        f"{mcp_tools}"
+        "USER REQUEST: \n"
+        f"{prompt_content} \n"
+
     )
+
+    ### debug print("plan content: ", plan_prompt_content ) 
 
     print(f"Generating plan for: '{prompt_content[:80]}...'")
 
     try:
         async with mcp_client:
             response = await gemini_client.aio.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt_content,
+                #model="gemini-2.5-flash",
+                model="gemma-3-27b-it",
+                contents=plan_prompt_content,
                 config=genai.types.GenerateContentConfig(
                     temperature=0,
-                    tools=[mcp_client.session],
-                    system_instruction=system_instruction, # Add the new instruction
+                    # tools=[mcp_client.session],
+                    # system_instruction=system_instruction, # Add the new instruction
+                    # response_mime_type="application/json"
                 ),
             )
             
@@ -373,7 +553,7 @@ def main():
         description="Run a prompt against the Gemini API using FastMCP for tool access."
     )
     # Mutually exclusive group for -p and -f
-    group = parser.add_mutually_exclusive_group(required=True)
+    group = parser.add_mutually_exclusive_group(required=False)
 
     group.add_argument(
         "-p", "--prompt",
@@ -386,13 +566,17 @@ def main():
         help="Path to a text file containing the prompt."
     )
     
-    # --- ADDED: The new --plan argument ---
     parser.add_argument(
         "--plan",
         action="store_true",
         help="Generate a JSON execution plan (.plan extension) without executing the tools."
     )
-    # --- END of ADDED argument ---
+
+    parser.add_argument(
+        "--execplan",
+        type=str,
+        help="Path to the JSON file containing the execution plan."
+    )
 
     args = parser.parse_args()
     prompt_content = None
@@ -412,6 +596,19 @@ def main():
 
     # --- ADDED: Logic to handle --plan or normal execution ---
     try:
+        if args.execplan:
+           print("exec plan")
+           mcp_client = Client("./mcp_command_server_enh.py",  elicitation_handler=handle_form_elicitation)
+           results = asyncio.run(execute_plan_steps(
+           json_file_path=args.execplan,
+           client=mcp_client ))
+           # Print the results
+           #for result in results:
+           #     print(f"Tool: {result['tool_name']}")
+           #    print(f"Parameters: {result['parameters']}")
+           #    print(f"Response: {result['response']}\n")
+
+           sys.exit(0)
         if args.plan:
             # Determine the output file name
             if args.prompt:
