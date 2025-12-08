@@ -16,4 +16,11 @@ restricted_files = [
     "mcp_server_command*.py"
 ]
 
+[models]
+# alias = [real_model_name, temperature, top_k]
+gemini_flash = ["gemini-2.5-flash", 0.0, 1]
+gemini_pro = ["gemini-2.5-pro", 0.0, 1]
+gemma_3 = ["gemma-3-27b-it", 0.0, 1]
+my_high_temp_model = ["gemini-2.5-flash", 0.8, 40]
+
 # If override set to True, all command restrictions are ignored and execution is permitted.
