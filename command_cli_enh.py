@@ -7,6 +7,7 @@ import sys
 from typing import Dict, Optional, Any
 from xml.etree import ElementTree as ET
 from xml.dom import minidom
+import tomli
 
 
 from fastmcp import Client
@@ -14,6 +15,54 @@ from fastmcp.client.elicitation import ElicitResult, ElicitRequestParams, Reques
 from google import genai
 
 from list import format_tools_for_print
+
+# --- GLOBAL CONFIGURATION DICTIONARY ---
+# This will hold the parsed TOML data
+CONFIG: Dict[str, Any] = {}
+# --- END GLOBAL CONFIGURATION DICTIONARY ---
+
+# The gemini_client initialization is now in main() after config is loaded
+gemini_client: Optional[genai.Client] = None # Define it globally but initialize later
+
+
+# --- NEW FUNCTION: CONFIG LOADER (tomli) ---
+def load_config(config_path: str) -> Dict[str, Any]:
+    """
+    Loads configuration from a TOML file using tomli, merging it with defaults.
+    """
+    default_config = {
+        "models": {
+            # alias: [real_model_name, temperature, top_k]
+            "gemini_flash": ["gemini-2.5-flash", 0.0, 1],
+            "gemma_3": ["gemma-3-27b-it", 0.0, 1],
+            "gemini_pro": ["gemini-2.5-pro", 0.0, 1],
+        }
+    }
+
+    if not os.path.exists(config_path):
+        print(f"Warning: Config file not found at '{config_path}'. Using default model settings.", file=sys.stderr)
+        return default_config
+
+    try:
+        with open(config_path, "rb") as f: # tomli requires reading in binary mode ("rb")
+            user_config = tomli.load(f)
+        
+        # Merge, ensuring defaults are preserved if sections are missing
+        config = default_config.copy()
+        if "models" in user_config:
+            config["models"].update(user_config["models"])
+            
+        return config
+
+    except tomli.TOMLDecodeError as e:
+        print(f"Error: Invalid TOML file format in '{config_path}': {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error loading config file '{config_path}': {e}", file=sys.stderr)
+        sys.exit(1)
+        
+# --- END NEW FUNCTION ---
+
 
 async def mcp_router(
     tool_name: str,
@@ -65,6 +114,13 @@ async def execute_plan_steps(
         FileNotFoundError: If the JSON file does not exist.
     """
 
+    # --- CONFIG RETRIEVAL FOR EXEC PLAN ---
+    # The model alias is stored in the global CONFIG under the 'current_model_alias' key
+    # which is set in main(). The format is [name, temp, topk].
+    model_alias = CONFIG.get("current_model_alias", "gemini_flash")
+    model_name, temperature, _ = CONFIG["models"].get(model_alias, CONFIG["models"]["gemini_flash"])
+    # --- END CONFIG RETRIEVAL ---
+    
     prompt_history = ""
     try:
         # Read the JSON file
@@ -101,35 +157,37 @@ async def execute_plan_steps(
                 continue
 
             step_prompt_content = (
-               "Check response against goal"
-               "Goal: \n"
-               f"{goal}"
-               "Response: \n"
-               f"{response}"
-               "important: \n"
-               "produce summary of goal met and reports requested"
-               "if there is data returned print it as is"
-               "check this for any highlevel analysis needed and show any qualitative review of results requested, that are not simple commands"
-               "Do not do qualitative review or highlevel analysis of commands marked Simple Commands"
-               f"{check}"
-               "prior history of execution for reference: "
-               f"{prompt_history}"               
-               "if tool call resulted in an error print ***ERROR***" 
+                "Check response against goal"
+                "Goal: \n"
+                f"{goal}"
+                "Response: \n"
+                f"{response}"
+                "important: \n"
+                "produce summary of goal met and reports requested"
+                "if there is data returned print it as is"
+                "check this for any highlevel analysis needed and show any qualitative review of results requested, that are not simple commands"
+                "Do not do qualitative review or highlevel analysis of commands marked Simple Commands"
+                f"{check}"
+                "prior history of execution for reference: "
+                f"{prompt_history}"  
+                "if tool call resulted in an error print ***ERROR***"  
             )
 
-
+            if not gemini_client:
+                 raise RuntimeError("Gemini client not initialized.")
+                 
             async with mcp_client:
                 step_response = await gemini_client.aio.models.generate_content(
-                   #model="gemini-2.5-flash",
-                   model="gemma-3-27b-it",
-                   contents=step_prompt_content,
-                   config=genai.types.GenerateContentConfig(
-                    temperature=0,
-                    # tools=[mcp_client.session],
-                    # system_instruction=system_instruction, # Add the new instruction
-                    # response_mime_type="application/json"
-                ),
-            )
+                    # --- MODIFIED: Use model from config ---
+                    model=model_name,
+                    contents=step_prompt_content,
+                    config=genai.types.GenerateContentConfig(
+                        temperature=temperature,
+                        # tools=[mcp_client.session],
+                        # system_instruction=system_instruction, # Add the new instruction
+                        # response_mime_type="application/json"
+                    ),
+                )
             # print("step_prompt_content: ", step_prompt_content )
             print("step response: ", step_response.text )
 
@@ -171,7 +229,7 @@ async def list_mcp_tools(client):
 #        output.append("resources:")
 #        output.append(str(resources))
 #        output.append("prompts:")
-#       output.append(str(prompts))
+#        output.append(str(prompts))
         output.append("END OF TOOLS\n")
 
         return "\n".join(output)
@@ -216,7 +274,7 @@ def _handle_form_interaction_and_serialization(form_xml_string: str) -> (Dict[st
     #print(" post ET ")
 
     captured_values = update_form_std(form_root, form_name)
- 
+    
     data_xml = convert_dict_to_xml(captured_values)
 
     return captured_values, data_xml
@@ -274,12 +332,7 @@ async def handle_form_elicitation(
 #######################
 mcp_client = Client("./mcp_command_server_enh.py",  elicitation_handler=handle_form_elicitation)
 #######################
-try:
-    gemini_client = genai.Client()
-except Exception as e:
-    # Handle the case where the client cannot be initialized (e.g., no API key)
-    print(f"Error initializing Gemini client: {e}", file=sys.stderr)
-    sys.exit(1)
+
 
 def format_prompt_old(field_name, field_type):
     # Calculate the number of '=' signs needed to reach the 30th character
@@ -293,7 +346,7 @@ def format_prompt(field_name, field_type):
     prompt_text = f"Enter value for {field_name} ({field_type})"
     num_equals = 50 - len(prompt_text) - 1  # -1 for the '>'
     equals_signs = '=' * num_equals
-    return f"{prompt_text}{equals_signs}>" 
+    return f"{prompt_text}{equals_signs}>"  
 
 def prompt_for_value(field_name, field_type, current_value):
     """
@@ -307,9 +360,9 @@ def prompt_for_value(field_name, field_type, current_value):
 
     #prompt = f"Enter value for {field_name} ({field_type})".ljust(30) + " ===> "
 
-    prompt = format_prompt( field_name, field_type ) 
+    prompt = format_prompt( field_name, field_type )  
 
- 
+    
     user_input = input(prompt).strip()
     
     if not user_input:
@@ -334,7 +387,7 @@ def update_form_std(form_root, form_name):
     print("\n" + "-" * (len(form_name) + 4))
     print(f" {form_name} ")
     print("-" * (len(form_name) + 4))
- 
+    
     print("=" * 50)
     
     captured_values = {}
@@ -375,16 +428,32 @@ async def run_query(prompt_content: str):
         print("Error: Prompt content is empty.", file=sys.stderr)
         return
 
-    print(f"Sending prompt to Gemini/FastMCP: '{prompt_content[:80]}...'")
+    # --- CONFIG RETRIEVAL ---
+    # The model alias is stored in the global CONFIG under the 'current_model_alias' key.
+    # The format in CONFIG["models"] is [name, temp, topk].
+    model_alias = CONFIG.get("current_model_alias", "gemini_flash")
+    model_name, temperature, top_k = CONFIG["models"].get(model_alias, CONFIG["models"]["gemini_flash"])
+    # --- END CONFIG RETRIEVAL ---
+    
+    # --- CHECK FOR CLIENT INIT ---
+    global gemini_client
+    if not gemini_client:
+        print("Error: Gemini client not initialized.", file=sys.stderr)
+        return
+    # --- END CHECK ---
+
+    print(f"Sending prompt to Gemini/FastMCP (Model: {model_name}, Temp: {temperature}): '{prompt_content[:80]}...'")
 
     try:
         async with mcp_client:
             # The only change here is replacing the hardcoded string with the variable
             response = await gemini_client.aio.models.generate_content(
-                model="gemini-2.5-flash",
+                # --- MODIFIED: Use model from config ---
+                model=model_name,
                 contents=prompt_content,  # Use the dynamic prompt
                 config=genai.types.GenerateContentConfig(
-                    temperature=0,
+                    temperature=temperature,
+                    top_k=top_k, # Added top_k
                     tools=[mcp_client.session],  # Pass the FastMCP client session
                 ),
             )
@@ -394,9 +463,9 @@ async def run_query(prompt_content: str):
 
             full_content_parts = response.candidates[0].content.parts
 
-            # uncomment to get full repsonse or view it in json format 
+            # uncomment to get full repsonse or view it in json format  
             try:
-                response_dict = response.to_dict() 
+                response_dict = response.to_dict()  
     
                 #pretty_json = json.dumps(response_dict, indent=4)
     
@@ -471,10 +540,22 @@ async def run_plan_query(prompt_content: str, plan_file: str):
         print("Error: Prompt content is empty.", file=sys.stderr)
         return
 
-    # get list in text form 
+    # --- CONFIG RETRIEVAL ---
+    model_alias = CONFIG.get("current_model_alias", "gemini_flash")
+    model_name, temperature, top_k = CONFIG["models"].get(model_alias, CONFIG["models"]["gemini_flash"])
+    # --- END CONFIG RETRIEVAL ---
+    
+    # --- CHECK FOR CLIENT INIT ---
+    global gemini_client
+    if not gemini_client:
+        print("Error: Gemini client not initialized.", file=sys.stderr)
+        return
+    # --- END CHECK ---
+
+    # get list in text form  
     mcp_tools = await list_mcp_tools(mcp_client)
 
-   
+    
     # New system instruction to enforce plan generation and JSON format
     plan_prompt_content = (
         "Purpose and output INSTRUCTIONS: \n"
@@ -486,7 +567,7 @@ async def run_plan_query(prompt_content: str, plan_file: str):
         "the 'input' should correspond to MCP specifications for parameters ( a dictionary )"
         "for commands that are simple and do not display output, prefix ***Simple command: *** in check text"
         "DO NOT execute the tools, and DO NOT include any explanatory text, markdown outside of the JSON block, or preamble."
-        "The model is expecting a single JSON array object in the response. **Only output the JSON array **" 
+        "The model is expecting a single JSON array object in the response. **Only output the JSON array **"  
         "Use JSON standard escapes even if output is perl, awk, bash or other language, pay attention to entire command"
         "Make sure any sub-language calles are escaped properly and use double escapes if need to ensure proper json"
         "if there is more than one logical ask in a line or sentence break it out 2 steps - such as list and then summarize"
@@ -497,18 +578,19 @@ async def run_plan_query(prompt_content: str, plan_file: str):
 
     )
 
-    ### debug print("plan content: ", plan_prompt_content ) 
+    ### debug print("plan content: ", plan_prompt_content )  
 
-    print(f"Generating plan for: '{prompt_content[:80]}...'")
+    print(f"Generating plan for (Model: {model_name}, Temp: {temperature}): '{prompt_content[:80]}...'")
 
     try:
         async with mcp_client:
             response = await gemini_client.aio.models.generate_content(
-                #model="gemini-2.5-flash",
-                model="gemma-3-27b-it",
+                # --- MODIFIED: Use model from config ---
+                model=model_name,
                 contents=plan_prompt_content,
                 config=genai.types.GenerateContentConfig(
-                    temperature=0,
+                    temperature=temperature,
+                    top_k=top_k, # Added top_k
                     # tools=[mcp_client.session],
                     # system_instruction=system_instruction, # Add the new instruction
                     # response_mime_type="application/json"
@@ -553,6 +635,10 @@ async def run_plan_query(prompt_content: str, plan_file: str):
 
 # The original main function is now for argument parsing and setup
 def main():
+    # --- NEW: Import global variables ---
+    global CONFIG, gemini_client
+    # --- END NEW: Import global variables ---
+    
     parser = argparse.ArgumentParser(
         description="Run a prompt against the Gemini API using FastMCP for tool access."
     )
@@ -581,9 +667,46 @@ def main():
         type=str,
         help="Path to the JSON file containing the execution plan."
     )
+    
+    # --- NEW ARGUMENTS ---
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="config.toml",
+        help="Path to the TOML configuration file (default: config.toml)."
+    )
+
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="gemini_flash", # Default alias
+        help="Alias of the model to use, as defined in the [models] section of the config file (default: gemini_flash).",
+    )
+    # --- END NEW ARGUMENTS ---
 
     args = parser.parse_args()
     prompt_content = None
+
+    # --- NEW: Load Configuration and Check Model ---
+    CONFIG = load_config(args.config)
+    
+    if args.model not in CONFIG["models"]:
+        print(f"Error: Model alias '{args.model}' not found in the config file.", file=sys.stderr)
+        print(f"Available models: {', '.join(CONFIG['models'].keys())}", file=sys.stderr)
+        sys.exit(1)
+        
+    # Store the selected model alias for use in run_query, run_plan_query, and execute_plan_steps
+    CONFIG["current_model_alias"] = args.model
+    # --- END NEW: Load Configuration and Check Model ---
+    
+    # --- MODIFIED: Initialize gemini_client after config load ---
+    try:
+        gemini_client = genai.Client()
+    except Exception as e:
+        print(f"Error initializing Gemini client: {e}", file=sys.stderr)
+        sys.exit(1)
+    # --- END MODIFIED: Initialize gemini_client ---
+
 
     if args.prompt:
         prompt_content = args.prompt
@@ -601,19 +724,23 @@ def main():
     # --- ADDED: Logic to handle --plan or normal execution ---
     try:
         if args.execplan:
-           print("exec plan")
-           mcp_client = Client("./mcp_command_server_enh.py",  elicitation_handler=handle_form_elicitation)
-           results = asyncio.run(execute_plan_steps(
-           json_file_path=args.execplan,
-           client=mcp_client ))
-           # Print the results
-           #for result in results:
-           #     print(f"Tool: {result['tool_name']}")
-           #    print(f"Parameters: {result['parameters']}")
-           #    print(f"Response: {result['response']}\n")
+            print("exec plan")
+            mcp_client = Client("./mcp_command_server_enh.py",  elicitation_handler=handle_form_elicitation)
+            results = asyncio.run(execute_plan_steps(
+            json_file_path=args.execplan,
+            client=mcp_client ))
+            # Print the results
+            #for result in results:
+            #     print(f"Tool: {result['tool_name']}")
+            #     print(f"Parameters: {result['parameters']}")
+            #     print(f"Response: {result['response']}\n")
 
-           sys.exit(0)
+            sys.exit(0)
         if args.plan:
+            if not prompt_content:
+                print("Error: --plan requires either --prompt or --file to be specified.", file=sys.stderr)
+                sys.exit(1)
+                
             # Determine the output file name
             if args.prompt:
                 # Use a simplified name based on the prompt content
@@ -624,10 +751,12 @@ def main():
                 plan_file_name = f"{base_name}.plan"
                 
             asyncio.run(run_plan_query(prompt_content, plan_file_name))
-        else:
+        elif prompt_content:
             # Normal execution
             asyncio.run(run_query(prompt_content))
-    # --- END of ADDED logic ---
+        else:
+             parser.print_help() # Print help if no prompt or file is provided
+    # --- END of MODIFIED logic ---
             
     except KeyboardInterrupt:
         print("\nOperation cancelled by user.", file=sys.stderr)
