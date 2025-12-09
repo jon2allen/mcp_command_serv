@@ -622,6 +622,7 @@ async def run_plan_query(prompt_content: str, plan_file: str):
         "You are an expert planning system. Your task is to generate a detailed, "
         "step-by-step plan in **JSON format only** for the user's request, using the list of available tools listed below: \n "
         "take a high level view - not every sentance or statement is a step, make sure to do in as few steps as possible, but meet goal"
+        f"please take note of operating system: {os.name} and locate programs before creating shebang for perl or other scripts"
         "make sure any sub-programs created are robust and deliver on expected outputs. "
         "The JSON must be an array of objects, where each object has 'step', 'goal', 'tool', 'input', and 'check' keys. "
         "the 'input' should correspond to MCP specifications for parameters ( a dictionary )"
