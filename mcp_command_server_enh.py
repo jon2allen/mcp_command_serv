@@ -7,7 +7,7 @@ import asyncio
 import logging
 import argparse
 import subprocess
-from typing import Dict, Any, List, Tuple,Literal,  Optional
+from typing import Dict, Any, List, Tuple, Literal, Optional
 from typing_extensions import TypedDict
 from dataclasses import dataclass, field
 from xml.etree import ElementTree as ET
@@ -17,7 +17,7 @@ import re    # Import re for robust command checking
 
 # local imports
 from pexpect_auto import PexpectAutomator
-from fastmcp import FastMCP,Context
+from fastmcp import FastMCP, Context
 from fastmcp.server.context import AcceptedElicitation
 
 from fastmcp.server.elicitation import (
@@ -367,7 +367,6 @@ def create_form(
   <xs:element name="Form">
     <xs:complexType>
       <xs:sequence>
-        <!-- Generic Field element with name and type attributes -->
         <xs:element name="Field" minOccurs="0" maxOccurs="unbounded">
           <xs:complexType>
             <xs:simpleContent>
@@ -389,7 +388,6 @@ def create_form(
           </xs:complexType>
         </xs:element>
       </xs:sequence>
-      <!-- Add a 'formName' attribute to the Form element -->
       <xs:attribute name="formName" type="xs:string" use="required"/>
     </xs:complexType>
   </xs:element>
@@ -445,7 +443,7 @@ def create_form(
         # 4. Log: Successful Directory Creation (only logs if it was necessary)
         logger.info("Checked/created 'forms' output directory.")
     except Exception as e:
-         # Optional: Log if os.makedirs fails for some permission reason
+          # Optional: Log if os.makedirs fails for some permission reason
         logger.error(f"Failed to ensure 'forms' directory exists: {e}")
         return "Error: form not created"
 
@@ -567,13 +565,13 @@ def get_form_xml(form_name: str) -> str:
 @mcp.tool
 async def display_info( ctx: Context, info: str ) -> str:
    """
-     Generic information display tool to force client to display content request
-     Important - please format for terminal viewing.  Carriage returns
-     and spaces
+      Generic information display tool to force client to display content request
+      Important - please format for terminal viewing.  Carriage returns
+      and spaces
 
-     parms:  
-          ctx;  The FastMCP context
-          info - the text to be displayed
+      parms:  
+           ctx;  The FastMCP context
+           info - the text to be displayed
 
    """
    logger.info("display_info")
@@ -630,9 +628,50 @@ async def elicit_dynamic_form(ctx: Context,  form_xml: str) -> dict:
     else:
         return {"status": "cancelled"}
 
+@mcp.tool
+async def file_write(
+    file_path: str,
+    content: str,
+    override: bool = False
+) -> str:
+    """
+    Write a string to a text file.
+
+    This tool writes the provided text content to a specific file.
+    It is intended for text files only (no binary).
+    The content is written 'as is' and is expected to be pre-formatted.
+
+    Args:
+        file_path: The path to the file to write.
+        content: The text string to write.
+        override: If True, overwrite existing files. If False, returns error if file exists.
+
+    Returns:
+        str: Success message or error message (e.g., "file exists").
+    """
+    logger.info("Received file_write request: path='%s', override=%s", file_path, override)
+
+    # Check restricted files config
+    if is_restricted_file_access(file_path):
+         logger.warning("Restricted file access denied: '%s'", file_path)
+         return "Error: This server is not authorized to access restricted files"
+
+    # Check if file exists and handle override logic
+    if os.path.exists(file_path) and not override:
+        logger.warning("File exists and override is False: '%s'", file_path)
+        return "file exists"
+
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        logger.info("Successfully wrote to file: %s", file_path)
+        return f"Successfully wrote to {file_path}"
+    except Exception as e:
+        logger.error("Failed to write to file '%s': %s", file_path, e)
+        return f"Error: {str(e)}"
+
 if __name__ == "__main__":
     # Load configuration before starting the server
     load_config()
     logger.info("Starting MCP Command Server")
     mcp.run()
-
