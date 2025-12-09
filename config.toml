@@ -16,11 +16,51 @@ restricted_files = [
     "mcp_server_command*.py"
 ]
 
-[models]
-# alias = [real_model_name, temperature, top_k]
-gemini_flash = ["gemini-2.5-flash", 0.0, 1]
-gemini_pro = ["gemini-2.5-pro", 0.0, 1]
-gemma_3 = ["gemma-3-27b-it", 0.0, 1]
-my_high_temp_model = ["gemini-2.5-flash", 0.8, 40]
+[models.gemini_flash]
+# Gemini Model running on Google's OpenAI-compatible endpoint
+name = "gemini-2.5-flash"
+temperature = 0.0
+top_k = 1
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+# API key is now strictly read from the LLM_API_KEY environment variable.
 
+[models.gemini_pro]
+# Another Gemini model
+name = "gemini-2.5-pro"
+temperature = 0.0
+top_k = 1
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+[models.gemma_3]
+# Another model, same endpoint
+name = "gemma-3-27b-it"
+temperature = 0.0
+top_k = 1
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+[models.openai_gpt4]
+# Example of a different vendor (OpenAI)
+name = "gpt-4o"
+temperature = 0.1
+top_k = 1 # Ignored by OpenAI, kept for consistency
+base_url = "https://api.openai.com/v1"
+
+[models.nova_2]
+name = "amazon/nova-2-lite-v1:free"
+temperature = 0.7 
+top_k = 1
+base_url = "https://openrouter.ai/api/v1"
+
+[models.nvida_1]
+name = "nvidia/nemotron-nano-12b-v2-vl:free"
+temperature = 0.7
+top_k = 1
+base_url = "https://openrouter.ai/api/v1"
+
+
+[models.gpt_oss_20b]
+name = "openai/gpt-oss-20b:free"
+temperature = 0.7
+top_k = 1
+base_url = "https://openrouter.ai/api/v1"
 # If override set to True, all command restrictions are ignored and execution is permitted.

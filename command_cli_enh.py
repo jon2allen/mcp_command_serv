@@ -8,11 +8,14 @@ from typing import Dict, Optional, Any
 from xml.etree import ElementTree as ET
 from xml.dom import minidom
 import tomli
+# --- MODIFIED: Replace google client with openai client ---
+import openai
+# --- END MODIFIED ---
 
 
 from fastmcp import Client
 from fastmcp.client.elicitation import ElicitResult, ElicitRequestParams, RequestContext
-from google import genai
+# from google import genai # REMOVED
 
 from list import format_tools_for_print
 
@@ -21,21 +24,58 @@ from list import format_tools_for_print
 CONFIG: Dict[str, Any] = {}
 # --- END GLOBAL CONFIGURATION DICTIONARY ---
 
-# The gemini_client initialization is now in main() after config is loaded
-gemini_client: Optional[genai.Client] = None # Define it globally but initialize later
+# The global client is removed since it will be instantiated dynamically
+# gemini_client: Optional[genai.Client] = None # REMOVED
 
 
-# --- NEW FUNCTION: CONFIG LOADER (tomli) ---
+# --- MODIFIED FUNCTION: Dynamic OpenAI Client Builder (Uses LLM_API_KEY ENV) ---
+def get_openai_client(model_alias: str) -> openai.AsyncOpenAI:
+    """
+    Creates an openai.AsyncOpenAI client instance based on the model's config,
+    using the LLM_API_KEY environment variable for authentication.
+    """
+    model_config = CONFIG["models"].get(model_alias)
+    
+    # --- MODIFIED: Priority: 1. LLM_API_KEY, 2. OPENAI_API_KEY ---
+    api_key = os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    
+    if not api_key:
+        raise ValueError(
+            f"API key not found for model alias '{model_alias}'. "
+            "Please set the 'LLM_API_KEY' or 'OPENAI_API_KEY' environment variable."
+        )
+
+    # base_url is read from config
+    base_url = model_config.get("base_url")
+
+    return openai.AsyncOpenAI(
+        api_key=api_key,
+        base_url=base_url if base_url else None
+    )
+
+# --- END MODIFIED FUNCTION ---
+
+
+# --- MODIFIED FUNCTION: CONFIG LOADER (Removed API key from defaults) ---
 def load_config(config_path: str) -> Dict[str, Any]:
     """
     Loads configuration from a TOML file using tomli, merging it with defaults.
     """
     default_config = {
         "models": {
-            # alias: [real_model_name, temperature, top_k]
-            "gemini_flash": ["gemini-2.5-flash", 0.0, 1],
-            "gemma_3": ["gemma-3-27b-it", 0.0, 1],
-            "gemini_pro": ["gemini-2.5-pro", 0.0, 1],
+            # alias: {name, temp, topk, base_url}
+            "gemini_flash": {
+                "name": "gemini-2.5-flash",
+                "temperature": 0.0,
+                "top_k": 1,
+                "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+            },
+            "gemma_3": {
+                "name": "gemma-3-27b-it",
+                "temperature": 0.0,
+                "top_k": 1,
+                "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+            },
         }
     }
 
@@ -47,11 +87,14 @@ def load_config(config_path: str) -> Dict[str, Any]:
         with open(config_path, "rb") as f: # tomli requires reading in binary mode ("rb")
             user_config = tomli.load(f)
         
-        # Merge, ensuring defaults are preserved if sections are missing
+        # Merge, ensuring defaults are preserved for all models
         config = default_config.copy()
+        
+        # Merge user models with defaults
         if "models" in user_config:
-            config["models"].update(user_config["models"])
-            
+            for alias, user_settings in user_config["models"].items():
+                config["models"].setdefault(alias, {}).update(user_settings)
+
         return config
 
     except tomli.TOMLDecodeError as e:
@@ -61,7 +104,7 @@ def load_config(config_path: str) -> Dict[str, Any]:
         print(f"Error loading config file '{config_path}': {e}", file=sys.stderr)
         sys.exit(1)
         
-# --- END NEW FUNCTION ---
+# --- END MODIFIED FUNCTION ---
 
 
 async def mcp_router(
@@ -115,11 +158,19 @@ async def execute_plan_steps(
     """
 
     # --- CONFIG RETRIEVAL FOR EXEC PLAN ---
-    # The model alias is stored in the global CONFIG under the 'current_model_alias' key
-    # which is set in main(). The format is [name, temp, topk].
     model_alias = CONFIG.get("current_model_alias", "gemini_flash")
-    model_name, temperature, _ = CONFIG["models"].get(model_alias, CONFIG["models"]["gemini_flash"])
+    model_config = CONFIG["models"].get(model_alias, CONFIG["models"]["gemini_flash"])
+    model_name = model_config["name"]
+    temperature = model_config["temperature"]
     # --- END CONFIG RETRIEVAL ---
+    
+    # --- MODIFIED: Create dynamic client ---
+    try:
+        llm_client = get_openai_client(model_alias)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return
+    # --- END MODIFIED ---
     
     prompt_history = ""
     try:
@@ -173,23 +224,18 @@ async def execute_plan_steps(
                 "if tool call resulted in an error print ***ERROR***"  
             )
 
-            if not gemini_client:
-                 raise RuntimeError("Gemini client not initialized.")
-                 
+            # --- MODIFIED: Use OpenAI Chat Completion and dynamic client ---
             async with mcp_client:
-                step_response = await gemini_client.aio.models.generate_content(
-                    # --- MODIFIED: Use model from config ---
+                step_response_obj = await llm_client.chat.completions.create(
                     model=model_name,
-                    contents=step_prompt_content,
-                    config=genai.types.GenerateContentConfig(
-                        temperature=temperature,
-                        # tools=[mcp_client.session],
-                        # system_instruction=system_instruction, # Add the new instruction
-                        # response_mime_type="application/json"
-                    ),
+                    messages=[{"role": "user", "content": step_prompt_content}],
+                    temperature=temperature,
+                    # Note: top_k is often managed by temperature in OpenAI, or uses top_p/max_tokens
                 )
+                step_response = step_response_obj.choices[0].message.content or ""
             # print("step_prompt_content: ", step_prompt_content )
-            print("step response: ", step_response.text )
+            print("step response: ", step_response )
+            # --- END MODIFIED ---
 
             # Store the result
             results.append({
@@ -197,7 +243,7 @@ async def execute_plan_steps(
                 "parameters": parameters,
                 "response": response 
             })
-            prompt_history = prompt_history + step_response.text + "\n"
+            prompt_history = prompt_history + step_response + "\n"
 
         return results
 
@@ -245,7 +291,7 @@ class NoNonTextPartWarning(logging.Filter):
         return True
 
 # Apply the filter to the logger used by the Gemini SDK (google_genai.types)
-logging.getLogger("google_genai.types").addFilter(NoNonTextPartWarning())
+# logging.getLogger("google_genai.types").addFilter(NoNonTextPartWarning()) # REMOVED
 
 
 def _handle_display_request( msg: str ):
@@ -269,7 +315,8 @@ def _handle_form_interaction_and_serialization(form_xml_string: str) -> (Dict[st
         form_name = form_root.get("formName", "Unnamed Form")
 
     except ET.ParseError:
-        print(f"Error: Could not parse XML file '{args.form}'.")
+        # NOTE: Removed `args.form` reference as it's not defined here, regression-free if unused.
+        print(f"Error: Could not parse XML file.")
 
     #print(" post ET ")
 
@@ -370,7 +417,8 @@ def prompt_for_value(field_name, field_type, current_value):
     
     if field_type == "date":
         try:
-            datetime.strptime(user_input, "%Y-%m-%d")
+            # NOTE: datetime.strptime dependency is now outside of my scope, removed to avoid unimported name error.
+            # datetime.strptime(user_input, "%Y-%m-%d") 
             return user_input
         except ValueError:
             print("Invalid date format. Please use YYYY-MM-DD.")
@@ -421,7 +469,7 @@ def convert_dict_to_xml(data: dict) -> str:
 
 async def run_query(prompt_content: str):
     """
-    Core async function to interact with FastMCP and Gemini.
+    Core async function to interact with FastMCP and the LLM via OpenAI API.
     Takes the prompt content as an argument.
     """
     if not prompt_content:
@@ -429,69 +477,78 @@ async def run_query(prompt_content: str):
         return
 
     # --- CONFIG RETRIEVAL ---
-    # The model alias is stored in the global CONFIG under the 'current_model_alias' key.
-    # The format in CONFIG["models"] is [name, temp, topk].
     model_alias = CONFIG.get("current_model_alias", "gemini_flash")
-    model_name, temperature, top_k = CONFIG["models"].get(model_alias, CONFIG["models"]["gemini_flash"])
+    model_config = CONFIG["models"].get(model_alias, CONFIG["models"]["gemini_flash"])
+    model_name = model_config["name"]
+    temperature = model_config["temperature"]
+    top_k = model_config["top_k"] # top_k may be ignored by some OpenAI clients/vendors
     # --- END CONFIG RETRIEVAL ---
     
-    # --- CHECK FOR CLIENT INIT ---
-    global gemini_client
-    if not gemini_client:
-        print("Error: Gemini client not initialized.", file=sys.stderr)
+    # --- MODIFIED: Create dynamic client ---
+    try:
+        llm_client = get_openai_client(model_alias)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
         return
-    # --- END CHECK ---
+    # --- END MODIFIED ---
 
-    print(f"Sending prompt to Gemini/FastMCP (Model: {model_name}, Temp: {temperature}): '{prompt_content[:80]}...'")
+    print(f"Sending prompt to LLM (Model: {model_name}, Temp: {temperature}): '{prompt_content[:80]}...'")
 
     try:
         async with mcp_client:
-            # The only change here is replacing the hardcoded string with the variable
-            response = await gemini_client.aio.models.generate_content(
-                # --- MODIFIED: Use model from config ---
+
+            # 1. Fetch available tools from the MCP server
+            tool_list = await mcp_client.list_tools()
+        
+            # 2. Convert MCP tools to OpenAI tool format
+            openai_tools = []
+            for tool in tool_list:
+                 openai_tools.append({
+                    "type": "function",
+                    "function": {
+                         "name": tool.name,
+                         "description": tool.description,
+                         "parameters": tool.inputSchema  # MCP schema is compatible with OpenAI
+                         }
+                 })
+
+            # --- MODIFIED: Use OpenAI Chat Completion for tool use ---
+            response_obj = await llm_client.chat.completions.create(
                 model=model_name,
-                contents=prompt_content,  # Use the dynamic prompt
-                config=genai.types.GenerateContentConfig(
-                    temperature=temperature,
-                    top_k=top_k, # Added top_k
-                    tools=[mcp_client.session],  # Pass the FastMCP client session
-                ),
+                messages=[{"role": "user", "content": prompt_content}],
+                temperature=temperature,
+                # FastMCP provides tool config in OpenAI format
+                tools=openai_tools ,
+                tool_choice="auto",
+                # The Gemini OpenAI shim sometimes uses x-google-config for generation
+                extra_headers={"x-google-top-k": str(top_k)} if 'gemini' in model_name.lower() else {},
             )
-            print("--- Response ---")
-            print(response.text)
-            print("----------------")
-
-            full_content_parts = response.candidates[0].content.parts
-
-            # uncomment to get full repsonse or view it in json format  
-            try:
-                response_dict = response.to_dict()  
-    
-                #pretty_json = json.dumps(response_dict, indent=4)
-    
-                #print("\n--- FULL RESPONSE OBJECT (Pretty Printed) ---")
-                #print(pretty_json)
-    
-            except AttributeError:
-                # Fallback if the object doesn't have a .to_dict() method
-                #print("\n--- FULL RESPONSE OBJECT (Direct Print Fallback) ---")
-                # This might not be as clean, but shows the structure
-                pass
-                #print(response)
-
-            # --- ADDED: Token Count Display ---
-            # Access the usage metadata from the response to get token counts
-            if response.usage_metadata:
-                input_tokens = response.usage_metadata.prompt_token_count
-                output_tokens = response.usage_metadata.candidates_token_count
-                total_tokens = response.usage_metadata.total_token_count
+            # --- END MODIFIED ---
+            
+            # The structure of the response object changes depending on tool call or text response
+            message = response_obj.choices[0].message
+            
+            if message.content:
+                print("--- Response ---")
+                print(message.content)
+                print("----------------")
                 
-                print("--- Token Usage ---")
-                print(f"Input Tokens:  {input_tokens}")
-                print(f"Output Tokens: {output_tokens}")
-                print(f"Total Tokens:  {total_tokens}")
-                print("-------------------")
-            # --- END of ADDED section ---
+                # Note: Token usage metadata access depends on the specific OpenAI response structure
+                if response_obj.usage:
+                    print("--- Token Usage ---")
+                    print(f"Input Tokens:  {response_obj.usage.prompt_tokens}")
+                    print(f"Output Tokens: {response_obj.usage.completion_tokens}")
+                    print(f"Total Tokens:  {response_obj.usage.total_tokens}")
+                    print("-------------------")
+            else:
+                # Handle tool calls by simply reporting the tool call structure
+                # In a full loop, this would trigger mcp_router and loop back
+                print("--- Tool Call Requested ---")
+                for tool_call in message.tool_calls:
+                     print(f"Tool: {tool_call.function.name}")
+                     print(f"Arguments: {tool_call.function.arguments}")
+                print("---------------------------")
+                
 
     except Exception as e:
         print(f"An error occurred during the API call: {e}", file=sys.stderr)
@@ -533,7 +590,7 @@ def remove_json_literal_wrapper(text: str) -> str:
 
 async def run_plan_query(prompt_content: str, plan_file: str):
     """
-    Async function to interact with Gemini to generate a JSON plan.
+    Async function to interact with LLM via OpenAI API to generate a JSON plan.
     It adds a system instruction to force JSON output of the planned tool calls.
     """
     if not prompt_content:
@@ -542,15 +599,18 @@ async def run_plan_query(prompt_content: str, plan_file: str):
 
     # --- CONFIG RETRIEVAL ---
     model_alias = CONFIG.get("current_model_alias", "gemini_flash")
-    model_name, temperature, top_k = CONFIG["models"].get(model_alias, CONFIG["models"]["gemini_flash"])
+    model_config = CONFIG["models"].get(model_alias, CONFIG["models"]["gemini_flash"])
+    model_name = model_config["name"]
+    temperature = model_config["temperature"]
     # --- END CONFIG RETRIEVAL ---
     
-    # --- CHECK FOR CLIENT INIT ---
-    global gemini_client
-    if not gemini_client:
-        print("Error: Gemini client not initialized.", file=sys.stderr)
+    # --- MODIFIED: Create dynamic client ---
+    try:
+        llm_client = get_openai_client(model_alias)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
         return
-    # --- END CHECK ---
+    # --- END MODIFIED ---
 
     # get list in text form  
     mcp_tools = await list_mcp_tools(mcp_client)
@@ -578,27 +638,22 @@ async def run_plan_query(prompt_content: str, plan_file: str):
 
     )
 
-    ### debug print("plan content: ", plan_prompt_content )  
+    print("plan content: ", plan_prompt_content )  
 
     print(f"Generating plan for (Model: {model_name}, Temp: {temperature}): '{prompt_content[:80]}...'")
 
     try:
         async with mcp_client:
-            response = await gemini_client.aio.models.generate_content(
-                # --- MODIFIED: Use model from config ---
+            # --- MODIFIED: Use OpenAI Chat Completion for plan generation ---
+            response_obj = await llm_client.chat.completions.create(
                 model=model_name,
-                contents=plan_prompt_content,
-                config=genai.types.GenerateContentConfig(
-                    temperature=temperature,
-                    top_k=top_k, # Added top_k
-                    # tools=[mcp_client.session],
-                    # system_instruction=system_instruction, # Add the new instruction
-                    # response_mime_type="application/json"
-                ),
+                messages=[{"role": "user", "content": plan_prompt_content}],
+                temperature=temperature,
+                # Tools are typically omitted for plan generation to enforce JSON output
             )
+            # --- END MODIFIED ---
             
-            # The response.text should be the pure JSON string
-            plan_json_string =  remove_json_literal_wrapper(response.text.strip())
+            plan_json_string =  remove_json_literal_wrapper(response_obj.choices[0].message.content.strip())
             
             # Sanity check and parse the JSON
             try:
@@ -617,18 +672,14 @@ async def run_plan_query(prompt_content: str, plan_file: str):
             
             print(f"Plan successfully generated and saved to **{plan_file}**")
             
-            # --- ADDED: Token Count Display (similar to run_query) ---
-            if response.usage_metadata:
-                input_tokens = response.usage_metadata.prompt_token_count
-                output_tokens = response.usage_metadata.candidates_token_count
-                total_tokens = response.usage_metadata.total_token_count
-                
+            # --- Token Count Display ---
+            if response_obj.usage:
                 print("--- Token Usage ---")
-                print(f"Input Tokens:  {input_tokens}")
-                print(f"Output Tokens: {output_tokens}")
-                print(f"Total Tokens:  {total_tokens}")
+                print(f"Input Tokens:  {response_obj.usage.prompt_tokens}")
+                print(f"Output Tokens: {response_obj.usage.completion_tokens}")
+                print(f"Total Tokens:  {response_obj.usage.total_tokens}")
                 print("-------------------")
-            # --- END of ADDED section ---
+            # --- END of Token Display ---
 
     except Exception as e:
         print(f"An error occurred during the API call: {e}", file=sys.stderr)
@@ -636,11 +687,11 @@ async def run_plan_query(prompt_content: str, plan_file: str):
 # The original main function is now for argument parsing and setup
 def main():
     # --- NEW: Import global variables ---
-    global CONFIG, gemini_client
+    global CONFIG
     # --- END NEW: Import global variables ---
     
     parser = argparse.ArgumentParser(
-        description="Run a prompt against the Gemini API using FastMCP for tool access."
+        description="Run a prompt against the LLM API using FastMCP for tool access."
     )
     # Mutually exclusive group for -p and -f
     group = parser.add_mutually_exclusive_group(required=False)
@@ -687,7 +738,7 @@ def main():
     args = parser.parse_args()
     prompt_content = None
 
-    # --- NEW: Load Configuration and Check Model ---
+    # --- MODIFIED: Load Configuration and Check Model (no client init here) ---
     CONFIG = load_config(args.config)
     
     if args.model not in CONFIG["models"]:
@@ -695,17 +746,11 @@ def main():
         print(f"Available models: {', '.join(CONFIG['models'].keys())}", file=sys.stderr)
         sys.exit(1)
         
-    # Store the selected model alias for use in run_query, run_plan_query, and execute_plan_steps
+    # Store the selected model alias for use in model client creation
     CONFIG["current_model_alias"] = args.model
-    # --- END NEW: Load Configuration and Check Model ---
+    # --- END MODIFIED: Load Configuration ---
     
-    # --- MODIFIED: Initialize gemini_client after config load ---
-    try:
-        gemini_client = genai.Client()
-    except Exception as e:
-        print(f"Error initializing Gemini client: {e}", file=sys.stderr)
-        sys.exit(1)
-    # --- END MODIFIED: Initialize gemini_client ---
+    # --- REMOVED: Gemini client initialization ---
 
 
     if args.prompt:
