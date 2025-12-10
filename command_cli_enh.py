@@ -481,16 +481,14 @@ async def run_query(prompt_content: str):
     model_config = CONFIG["models"].get(model_alias, CONFIG["models"]["gemini_flash"])
     model_name = model_config["name"]
     temperature = model_config["temperature"]
-    top_k = model_config["top_k"] # top_k may be ignored by some OpenAI clients/vendors
+    top_k = model_config["top_k"]
     # --- END CONFIG RETRIEVAL ---
     
-    # --- MODIFIED: Create dynamic client ---
     try:
         llm_client = get_openai_client(model_alias)
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         return
-    # --- END MODIFIED ---
 
     print(f"Sending prompt to LLM (Model: {model_name}, Temp: {temperature}): '{prompt_content[:80]}...'")
 
@@ -508,50 +506,70 @@ async def run_query(prompt_content: str):
                     "function": {
                          "name": tool.name,
                          "description": tool.description,
-                         "parameters": tool.inputSchema  # MCP schema is compatible with OpenAI
+                         "parameters": tool.inputSchema
                          }
                  })
 
-            # --- MODIFIED: Use OpenAI Chat Completion for tool use ---
-            response_obj = await llm_client.chat.completions.create(
-                model=model_name,
-                messages=[{"role": "user", "content": prompt_content}],
-                temperature=temperature,
-                # FastMCP provides tool config in OpenAI format
-                tools=openai_tools ,
-                tool_choice="auto",
-                # The Gemini OpenAI shim sometimes uses x-google-config for generation
-                extra_headers={"x-google-top-k": str(top_k)} if 'gemini' in model_name.lower() else {},
-            )
+            # --- MODIFIED: History initialization and Loop ---
+            messages = [{"role": "user", "content": prompt_content}]
+
+            while True:
+                response_obj = await llm_client.chat.completions.create(
+                    model=model_name,
+                    messages=messages, # Use dynamic history
+                    temperature=temperature,
+                    tools=openai_tools,
+                    tool_choice="auto",
+                    extra_headers={"x-google-top-k": str(top_k)} if 'gemini' in model_name.lower() else {},
+                )
+
+                message = response_obj.choices[0].message
+                messages.append(message) # Feature 2: Keep history of response
+
+                if message.tool_calls:
+                    # Feature 1: Loop on tool output
+                    for tool_call in message.tool_calls:
+                         # Parse arguments from JSON string to dict
+                         tool_args = json.loads(tool_call.function.arguments)
+                         
+                         print(f"--- Tool Call: {tool_call.function.name} ---")
+                         
+                         # Execute tool via router
+                         tool_response = await mcp_router(
+                            tool_name=tool_call.function.name,
+                            parameters=tool_args,
+                            mcp_client=mcp_client
+                        )
+                         
+                         # Feature 2: Append tool result to history
+                         messages.append({
+                             "role": "tool",
+                             "tool_call_id": tool_call.id,
+                             "content": str(tool_response)
+                         })
+                    # Loop continues here to redrive the prompt with new history
+                
+                else:
+                    # Feature 3: Print response when not tool (Final Answer)
+                    if message.content:
+                        print("--- Response ---")
+                        print(message.content)
+                        print("----------------")
+                        
+                        if response_obj.usage:
+                            print("--- Token Usage ---")
+                            print(f"Input Tokens:  {response_obj.usage.prompt_tokens}")
+                            print(f"Output Tokens: {response_obj.usage.completion_tokens}")
+                            print(f"Total Tokens:  {response_obj.usage.total_tokens}")
+                            print("-------------------")
+                    
+                    # Break the loop as we have a final text response
+                    break
             # --- END MODIFIED ---
-            
-            # The structure of the response object changes depending on tool call or text response
-            message = response_obj.choices[0].message
-            
-            if message.content:
-                print("--- Response ---")
-                print(message.content)
-                print("----------------")
-                
-                # Note: Token usage metadata access depends on the specific OpenAI response structure
-                if response_obj.usage:
-                    print("--- Token Usage ---")
-                    print(f"Input Tokens:  {response_obj.usage.prompt_tokens}")
-                    print(f"Output Tokens: {response_obj.usage.completion_tokens}")
-                    print(f"Total Tokens:  {response_obj.usage.total_tokens}")
-                    print("-------------------")
-            else:
-                # Handle tool calls by simply reporting the tool call structure
-                # In a full loop, this would trigger mcp_router and loop back
-                print("--- Tool Call Requested ---")
-                for tool_call in message.tool_calls:
-                     print(f"Tool: {tool_call.function.name}")
-                     print(f"Arguments: {tool_call.function.arguments}")
-                print("---------------------------")
-                
 
     except Exception as e:
         print(f"An error occurred during the API call: {e}", file=sys.stderr)
+
 
 
 def remove_json_literal_wrapper(text: str) -> str:
