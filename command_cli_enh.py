@@ -4,7 +4,7 @@ import argparse
 import asyncio
 import os
 import sys
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 from xml.etree import ElementTree as ET
 from xml.dom import minidom
 import tomli
@@ -72,7 +72,7 @@ def load_config(config_path: str) -> Dict[str, Any]:
             },
             "gemma_3": {
                 "name": "gemma-3-27b-it",
-                "temperature": 0.0,
+                "temperature": 0.7,
                 "top_k": 1,
                 "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
             },
@@ -138,16 +138,20 @@ async def mcp_router(
            return f"Error calling tool '{tool_name}': {str(e)}"
 
 async def execute_plan_steps(
-    json_file_path: str,
+    json_file_path: Optional[str],
     client: Client,  # Use the imported Client class
+    plan_data: Optional[List[Dict]] = None # Added optional plan_data for in-memory execution
 ) -> Any:
     """
     Reads a JSON file containing a sequence of steps, extracts the tool name and parameters,
     and calls `mcp_router` for each step using the provided FastMCP client.
+    
+    Can also accept a plan_data list directly, bypassing file read.
 
     Args:
-        json_file_path: Path to the JSON file containing the steps.
+        json_file_path: Path to the JSON file containing the steps (Optional if plan_data provided).
         client: Pre-initialized FastMCP Client instance.
+        plan_data: List of steps dictionary (Optional).
 
     Returns:
         List of dictionaries containing the tool name, parameters, and response for each step.
@@ -174,13 +178,19 @@ async def execute_plan_steps(
     
     prompt_history = ""
     try:
-        # Read the JSON file
-        with open(json_file_path, "r") as file:
-            steps = json.load(file)
+        steps = []
+        if plan_data is not None:
+             steps = plan_data
+        elif json_file_path:
+            # Read the JSON file
+            with open(json_file_path, "r") as file:
+                steps = json.load(file)
+        else:
+             raise ValueError("Either json_file_path or plan_data must be provided.")
 
         # Validate the JSON structure
         if not isinstance(steps, list):
-            raise ValueError("JSON file must contain a list of steps.")
+            raise ValueError("Steps data must be a list.")
 
         results = []
 
@@ -703,6 +713,126 @@ async def run_plan_query(prompt_content: str, plan_file: str):
     except Exception as e:
         print(f"An error occurred during the API call: {e}", file=sys.stderr)
 
+async def run_handprint_query(prompt_content: str):
+    """
+    Executes a query by looping (ReAct style) but uses text-based tool 
+    descriptions/output instead of native API tool definitions.
+    """
+    if not prompt_content:
+        print("Error: Prompt content is empty.", file=sys.stderr)
+        return
+
+    # --- CONFIG RETRIEVAL ---
+    model_alias = CONFIG.get("current_model_alias", "gemini_flash")
+    model_config = CONFIG["models"].get(model_alias, CONFIG["models"]["gemini_flash"])
+    model_name = model_config["name"]
+    temperature = model_config["temperature"]
+    top_k = model_config["top_k"]
+    # --- END CONFIG RETRIEVAL ---
+
+    try:
+        llm_client = get_openai_client(model_alias)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return
+
+    print(f"Starting Handprint Query (Model: {model_name})...")
+    
+    try:
+        async with mcp_client:
+            # 1. Get tools list in text form
+            mcp_tools_text = await list_mcp_tools(mcp_client)
+
+            # 2. Construct Initial Prompt
+            # "just pass the prompt, but with an additional prompt - uses the tools below. with the list of mcp tools."
+            formatted_prompt = (
+                "Execute and call tools to solve query"
+                "IMPORTANT: Only one tool can be executed at a time - print JSON for one tool and wait for next step"
+                "check for tool execution history"
+                "do not describe the process - only after last tool call put out description"
+                "Use tools to create files"
+                f"{prompt_content}\n\n"
+                "uses the tools below:\n"
+                f"{mcp_tools_text}\n\n"
+                "IMPORTANT: To call a tool, you must output a JSON object containing keys 'tool' and 'input'. "
+                "Use proper escapes even if output is perl, awk, bash or other language, pay attention to entire command. "
+                "Make sure any sub-language calls are escaped properly and use double escapes if need to ensure proper json"
+                "No extra commentary needed around tool call"
+                "If you are answering the user directly, use display_info tool."
+            )
+
+            # 3. Initialize History
+            messages = [{"role": "user", "content": formatted_prompt}]
+
+            while True:
+                # 4. Call LLM (No native tools)
+                response_obj = await llm_client.chat.completions.create(
+                    model=model_name,
+                    messages=messages,
+                    temperature=temperature,
+                    extra_headers={"x-google-top-k": str(top_k)} if 'gemini' in model_name.lower() else {},
+                )
+
+                message = response_obj.choices[0].message
+                messages.append(message) # Add Assistant Response to History
+                
+                content = message.content or ""
+                
+                # 5. Check for JSON Tool Call in text response
+                tool_to_execute = None
+                
+                # Attempt to extract JSON from the text
+                try:
+                    cleaned_content = remove_json_literal_wrapper(content)
+                    print("cleaned: \n", cleaned_content )
+                    # Simple heuristic: if it looks like a JSON object with 'tool' key
+                    if "{" in cleaned_content and "tool" in cleaned_content:
+                        # Attempt parse
+                        parsed = json.loads(cleaned_content)
+                        if isinstance(parsed, dict) and "tool" in parsed:
+                            tool_to_execute = parsed
+                except json.JSONDecodeError:
+                    pass
+                except Exception:
+                    pass
+
+                if tool_to_execute:
+                    # 6. Execute Tool
+                    print(f"--- Tool Call (Text-based): {tool_to_execute['tool']} ---")
+                    
+                    tool_response = await mcp_router(
+                        tool_name=tool_to_execute['tool'],
+                        parameters=tool_to_execute.get('input', {}),
+                        mcp_client=mcp_client
+                    )
+                    
+                    # 7. Add Result to History
+                    # For text-based loops, we return the tool output as a User message (or System, but User is safer for generic models)
+                    tool_result_msg = f"Tool Output: {tool_response}"
+                    messages.append({
+                        "role": "user", 
+                        "content": tool_result_msg
+                    })
+                    
+                    # Loop continues...
+                else:
+                    # 8. Final Answer (Text)
+                    print("--- Response ---")
+                    print(content)
+                    print("----------------")
+
+                    if response_obj.usage:
+                        print("--- Token Usage ---")
+                        print(f"Input Tokens:  {response_obj.usage.prompt_tokens}")
+                        print(f"Output Tokens: {response_obj.usage.completion_tokens}")
+                        print(f"Total Tokens:  {response_obj.usage.total_tokens}")
+                        print("-------------------")
+                    
+                    break
+
+    except Exception as e:
+        print(f"An error occurred during the handprint execution: {e}", file=sys.stderr)
+
 # The original main function is now for argument parsing and setup
 def main():
     # --- NEW: Import global variables ---
@@ -736,6 +866,12 @@ def main():
         "--execplan",
         type=str,
         help="Path to the JSON file containing the execution plan."
+    )
+    
+    parser.add_argument(
+        "--handprint",
+        action="store_true",
+        help="Run query using text-based tool descriptions (Handprint) instead of native tool calls."
     )
     
     # --- NEW ARGUMENTS ---
@@ -800,7 +936,14 @@ def main():
             #     print(f"Response: {result['response']}\n")
 
             sys.exit(0)
-        if args.plan:
+            
+        if args.handprint:
+            if not prompt_content:
+                print("Error: --handprint requires either --prompt or --file to be specified.", file=sys.stderr)
+                sys.exit(1)
+            asyncio.run(run_handprint_query(prompt_content))
+
+        elif args.plan:
             if not prompt_content:
                 print("Error: --plan requires either --prompt or --file to be specified.", file=sys.stderr)
                 sys.exit(1)
