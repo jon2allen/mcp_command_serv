@@ -1,0 +1,21 @@
+
+
+first obtain current working directory 
+
+create a perl script to do this.   save it as find_repo.pl.
+
+task for script: 
+
+in the $HOME directory and spanning all subdirs 
+
+determine the number of github repos
+and size of each repo using du command - do not use awk
+
+list directory and size summary of each git repo
+
+after creating script:
+
+
+
+execute and display the output output of find_repo.pl 
+Summarize results
