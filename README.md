@@ -17,8 +17,7 @@ This script provides an enhanced command-line interface for interacting with the
 
 ### Available Tools Summary ###
 
-
---- Tool 1/4 ---
+--- Tool 1/9 ---
 * **Name:** run_command
 * **Purpose:** Run a shell command on the local machine and get the output. Args: command: The shell command to execute. workdir: The working directory for the command. If None, uses the current directory. stdin: Optional stdin to pipe into the command. Returns: A dictionary containing the command's output, exit code, and error status.
 * **Inputs:**
@@ -26,28 +25,56 @@ This script provides an enhanced command-line interface for interacting with the
   - workdir: <string | null>
   - stdin: <string | null>
 
---- Tool 2/4 ---
+--- Tool 2/9 ---
 * **Name:** get_current_dir
 * **Purpose:** Get the current working directory returns str -> directory ( ex "/home/user1"
 * **Inputs:**
   (None)
 
---- Tool 3/4 ---
+--- Tool 3/9 ---
 * **Name:** change_dir
 * **Purpose:** Change the directory to specified string relative and absolute paths are supported If error - will return string "error: invalid directory"
 * **Inputs:**
   - c_dir*: <string>
 
---- Tool 4/4 ---
+--- Tool 4/9 ---
 * **Name:** run_expect_script
 * **Purpose:** Run a program with a sequence of expect/send actions for programs that are interactive. Programs that require inputs. important: do not send carriage return or line feed with text on send. Args: program: The command to run (e.g. "python3 myscript.py"). Can be any command actions: A list of dicts, e.g. [{"action": "expect", "text": "foo"}, {"action":"send","text":"bar"}] Returns: The output from the interaction.
 * **Inputs:**
   - program*: <string>
   - actions*: <array>
 
-##############################
-resouces: 
-[Resource(name='system_info', title=None, uri=AnyUrl('resource://system_info'), description='Provides basic information about the host operating system.', mimeType='text/plain', size=None, icons=None, annotations=None, meta={'_fastmcp': {'tags': []}})]
+--- Tool 5/9 ---
+* **Name:** create_form
+* **Purpose:** Creates an XML form file based on the provided schema. schema definition: <?xml version="1.0" encoding="UTF-8"?> <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"> <xs:element name="Form"> <xs:complexType> <xs:sequence> <!-- Generic Field element with name and type attributes --> <xs:element name="Field" minOccurs="0" maxOccurs="unbounded"> <xs:complexType> <xs:simpleContent> <xs:extension base="xs:string"> <xs:attribute name="name" type="xs:string" use="required"/> <xs:attribute name="type" use="required"> <xs:simpleType> <xs:restriction base="xs:string"> <xs:enumeration value="string"/> <xs:enumeration value="date"/> <xs:enumeration value="float"/> <xs:enumeration value="decimal"/> <xs:enumeration value="integer"/> </xs:restriction> </xs:simpleType> </xs:attribute> </xs:extension> </xs:simpleContent> </xs:complexType> </xs:element> </xs:sequence> <!-- Add a 'formName' attribute to the Form element --> <xs:attribute name="formName" type="xs:string" use="required"/> </xs:complexType> </xs:element> </xs:schema> Args: form_name: Name of the form (without extension). fields: List of tuples, each containing (field_name, field_type). Returns: str: "Form <form_name> created" or "Error: form not created".
+* **Inputs:**
+  - form_name*: <string>
+  - fields*: <array>
+
+--- Tool 6/9 ---
+* **Name:** list_forms
+* **Purpose:** Lists the names of all forms found in the 'forms' directory. The name is extracted from the 'formName' attribute within the XML file rather than using the file name. Returns: List[str]: A list of human-readable form names. Returns an empty list if the 'forms' directory doesn't exist or is empty.
+* **Inputs:**
+  (None)
+
+--- Tool 7/9 ---
+* **Name:** get_form_xml
+* **Purpose:** Retrieves the raw XML content for a specific form name from the 'forms' directory. The function searches all XML files in the 'forms' directory and matches the requested name against the 'formName' attribute inside the XML content. Args: form_name: The human-readable name of the form (e.g., "Vessel Registration"). Returns: str: The raw XML content string if the form is found, otherwise "Error: unable to find form name '<form_name>'."
+* **Inputs:**
+  - form_name*: <string>
+
+--- Tool 8/9 ---
+* **Name:** display_info
+* **Purpose:** Generic information display tool to force client to display content request Important - please format for terminal viewing. Carriage returns and spaces parms: ctx; The FastMCP context info - the text to be displayed
+* **Inputs:**
+  - info*: <string>
+
+--- Tool 9/9 ---
+* **Name:** elicit_dynamic_form
+* **Purpose:** A generic tool that elicits a response from the user using a provided XML form string. Args: ctx: The FastMCP context. form_xml: A string containing valid form XML. Returns: an xml of the data collected from the form.
+* **Inputs:**
+  - form_xml*: <string>
+
 
 ##
 
