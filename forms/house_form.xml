@@ -1,0 +1,8 @@
+<?xml version="1.0" ?>
+<Form formName="house">
+  <Field name="street address" type="string"/>
+  <Field name="square feet" type="integer"/>
+  <Field name="stories" type="integer"/>
+  <Field name="days on market" type="integer"/>
+  <Field name="zipcode" type="string"/>
+</Form>
