@@ -28,21 +28,29 @@ CONFIG: Dict[str, Any] = {}
 # gemini_client: Optional[genai.Client] = None # REMOVED
 
 
-# --- MODIFIED FUNCTION: Dynamic OpenAI Client Builder (Uses LLM_API_KEY ENV) ---
+# --- MODIFIED FUNCTION: Dynamic OpenAI Client Builder (Uses Configured Env Variable) ---
 def get_openai_client(model_alias: str) -> openai.AsyncOpenAI:
     """
-    Creates an openai.AsyncOpenAI client instance based on the model's config,
-    using the LLM_API_KEY environment variable for authentication.
+    Creates an openai.AsyncOpenAI client instance based on the model's config.
+    It retrieves the specific environment variable name defined in the config
+    (e.g., 'GEMINI_API_KEY') and uses that to fetch the actual key.
     """
     model_config = CONFIG["models"].get(model_alias)
     
-    # --- MODIFIED: Priority: 1. LLM_API_KEY, 2. OPENAI_API_KEY ---
-    api_key = os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    if not model_config:
+        raise ValueError(f"Model alias '{model_alias}' not found in configuration.")
+
+    # 1. Get the name of the environment variable from the config
+    # We default to 'LLM_API_KEY' to maintain backward compatibility if the key is missing in config
+    env_var_name = model_config.get("api_key", "LLM_API_KEY")
+
+    # 2. Get the actual API key value from the environment
+    api_key = os.environ.get(env_var_name)
     
     if not api_key:
         raise ValueError(
             f"API key not found for model alias '{model_alias}'. "
-            "Please set the 'LLM_API_KEY' or 'OPENAI_API_KEY' environment variable."
+            f"Please set the '{env_var_name}' environment variable."
         )
 
     # base_url is read from config
@@ -52,29 +60,30 @@ def get_openai_client(model_alias: str) -> openai.AsyncOpenAI:
         api_key=api_key,
         base_url=base_url if base_url else None
     )
-
 # --- END MODIFIED FUNCTION ---
 
 
-# --- MODIFIED FUNCTION: CONFIG LOADER (Removed API key from defaults) ---
+# --- MODIFIED FUNCTION: CONFIG LOADER (Added api_key field to defaults) ---
 def load_config(config_path: str) -> Dict[str, Any]:
     """
     Loads configuration from a TOML file using tomli, merging it with defaults.
     """
     default_config = {
         "models": {
-            # alias: {name, temp, topk, base_url}
+            # alias: {name, temp, topk, base_url, api_key_env_var_name}
             "gemini_flash": {
                 "name": "gemini-2.5-flash",
                 "temperature": 0.0,
                 "top_k": 1,
                 "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+                "api_key": "LLM_API_KEY", # Default fallback
             },
             "gemma_3": {
                 "name": "gemma-3-27b-it",
                 "temperature": 0.7,
                 "top_k": 1,
                 "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+                "api_key": "LLM_API_KEY", # Default fallback
             },
         }
     }
