@@ -101,25 +101,27 @@ mock_tools_data = [
 # Run the function
 # print(format_tools_for_print(mock_tools_data))
 
-# Local Python script
-client = Client("mcp_command_server_enh.py")
+if __name__ == "__main__":
 
-async def main():
-    async with client:
-        # Basic server interaction
-        await client.ping()
+# Local Python script
+ client = Client("mcp_command_server_enh.py")
+
+ async def main():
+     async with client:
+         # Basic server interaction
+         await client.ping()
         
-        # List available operations
-        tools = await client.list_tools()
-        resources = await client.list_resources()
-        prompts = await client.list_prompts()
+         # List available operations
+         tools = await client.list_tools()
+         resources = await client.list_resources()
+         prompts = await client.list_prompts()
         
         # Execute operations
         #        print(tools)
 
-        formatted_tools = format_tools_for_print(tools)
-        print(formatted_tools)
-        print("resouces: ")
-        print(resources)
+         formatted_tools = format_tools_for_print(tools)
+         print(formatted_tools)
+         print("resouces: ")
+         print(resources)
 
-asyncio.run(main())
+ asyncio.run(main())
