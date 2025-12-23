@@ -16,6 +16,16 @@ restricted_files = [
     "mcp_server_command*.py"
 ]
 
+[mcp.mcp_command_server]
+server = "./mcp_command_server_enh.py"
+description = "standard command servers"
+elicitation_handler = "handle_form_elicitation"
+
+[mcp.smol_search_mcp]
+server = "./smol_search_mcp.py"
+description = "SMOL search tools"
+
+
 [models.mistral_1]
 name = "mistral-large-2512"
 temperature = 0.7
@@ -84,5 +94,20 @@ temperature = 0.7
 top_k = 1
 base_url = "https://api.mistral.ai/v1"
 api_key = "MISTRAL_API_KEY"
+
+[models.Jan_v1_4b]
+name = "janhq/Jan-v1-4B"
+top_k = 1
+temperature = 0.6
+base_url = "https://api.bytez.com/models/v2/openai/v1"
+api_key = "BYTEZ_API_KEY"
+
+
+[models.swiss]
+name = "swiss-ai/apertus-70b-instruct"
+top_k = 1
+temperature = 0.7
+base_url = "https://api.publicai.co/v1"
+api_key = "SWISS_API_KEY"
 
 # If override set to True, all command restrictions are ignored and execution is permitted.

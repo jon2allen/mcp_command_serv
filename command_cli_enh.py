@@ -104,6 +104,9 @@ def load_config(config_path: str) -> Dict[str, Any]:
             for alias, user_settings in user_config["models"].items():
                 config["models"].setdefault(alias, {}).update(user_settings)
 
+        if "mcp" in user_config:
+            config["mcp"] = user_config["mcp"]
+
         return config
 
     except tomli.TOMLDecodeError as e:
@@ -208,6 +211,8 @@ async def execute_plan_steps(
             if not isinstance(step, dict):
                 raise ValueError("Each step must be a dictionary.")
 
+            print("step: ", step )
+
             tool_name = step.get("tool")
             parameters = step.get("input", {})
             goal = step.get("goal")
@@ -244,7 +249,7 @@ async def execute_plan_steps(
             )
 
             # --- MODIFIED: Use OpenAI Chat Completion and dynamic client ---
-            async with mcp_client:
+            async with client:
                 step_response_obj = await llm_client.chat.completions.create(
                     model=model_name,
                     messages=[{"role": "user", "content": step_prompt_content}],
@@ -396,7 +401,7 @@ async def handle_form_elicitation(
 # --- Initialization ---
 # define mcp_client
 #######################
-mcp_client = Client("./mcp_command_server_enh.py",  elicitation_handler=handle_form_elicitation)
+#mcp_client = Client("./mcp_command_server_enh.py",  elicitation_handler=handle_form_elicitation)
 #######################
 
 
@@ -486,7 +491,7 @@ def convert_dict_to_xml(data: dict) -> str:
     return ET.tostring(result_root, encoding="unicode")
 
 
-async def run_query(prompt_content: str):
+async def run_query(prompt_content: str, mcp_client):
     """
     Core async function to interact with FastMCP and the LLM via OpenAI API.
     Takes the prompt content as an argument.
@@ -625,7 +630,7 @@ def remove_json_literal_wrapper(text: str) -> str:
     # If no wrapper is found, return the stripped text as is
     return stripped_text
 
-async def run_plan_query(prompt_content: str, plan_file: str):
+async def run_plan_query(prompt_content: str, plan_file: str, mcp_client):
     """
     Async function to interact with LLM via OpenAI API to generate a JSON plan.
     It adds a system instruction to force JSON output of the planned tool calls.
@@ -722,7 +727,7 @@ async def run_plan_query(prompt_content: str, plan_file: str):
     except Exception as e:
         print(f"An error occurred during the API call: {e}", file=sys.stderr)
 
-async def run_handprint_query(prompt_content: str):
+async def run_handprint_query(prompt_content: str, mcp_client):
     """
     Executes a query by looping (ReAct style) but uses text-based tool 
     descriptions/output instead of native API tool definitions.
@@ -897,6 +902,9 @@ def main():
         default="gemini_flash", # Default alias
         help="Alias of the model to use, as defined in the [models] section of the config file (default: gemini_flash).",
     )
+
+    
+    parser.add_argument("--mcp", type=str, help="Alias of the MCP server to use, as defined in the [mcp] section of the config file.")
     # --- END NEW ARGUMENTS ---
 
     args = parser.parse_args()
@@ -904,6 +912,7 @@ def main():
 
     # --- MODIFIED: Load Configuration and Check Model (no client init here) ---
     CONFIG = load_config(args.config)
+
     
     if args.model not in CONFIG["models"]:
         print(f"Error: Model alias '{args.model}' not found in the config file.", file=sys.stderr)
@@ -913,6 +922,27 @@ def main():
     # Store the selected model alias for use in model client creation
     CONFIG["current_model_alias"] = args.model
     # --- END MODIFIED: Load Configuration ---
+
+
+    CONFIG["current_model_alias"] = args.model
+
+    # Dynamic MCP Initialization
+    server_path = "./mcp_command_server_enh.py"
+    handler = handle_form_elicitation
+
+    if args.mcp:
+        mcp_cfg = CONFIG.get("mcp", {}).get(args.mcp)
+        if not mcp_cfg:
+            sys.exit(f"Error: MCP alias '{args.mcp}' not found in config.")
+        print(f"MCP Server: {args.mcp} - {mcp_cfg.get('description')}")
+        server_path = mcp_cfg["server"]
+        # Allow dynamic lookup of handler if defined in globals
+        handler_name = mcp_cfg.get("elicitation_handler")
+        if handler_name and handler_name in globals():
+            handler = globals()[handler_name]
+
+    mcp_client = Client(server_path, elicitation_handler=handler)
+
     
     # --- REMOVED: Gemini client initialization ---
 
@@ -934,7 +964,7 @@ def main():
     try:
         if args.execplan:
             print("exec plan")
-            mcp_client = Client("./mcp_command_server_enh.py",  elicitation_handler=handle_form_elicitation)
+            # mcp_client = Client("./mcp_command_server_enh.py",  elicitation_handler=handle_form_elicitation)
             results = asyncio.run(execute_plan_steps(
             json_file_path=args.execplan,
             client=mcp_client ))
@@ -950,7 +980,7 @@ def main():
             if not prompt_content:
                 print("Error: --handprint requires either --prompt or --file to be specified.", file=sys.stderr)
                 sys.exit(1)
-            asyncio.run(run_handprint_query(prompt_content))
+            asyncio.run(run_handprint_query(prompt_content, mcp_client))
 
         elif args.plan:
             if not prompt_content:
@@ -966,10 +996,10 @@ def main():
                 base_name = os.path.splitext(args.file)[0]
                 plan_file_name = f"{base_name}.plan"
                 
-            asyncio.run(run_plan_query(prompt_content, plan_file_name))
+            asyncio.run(run_plan_query(prompt_content, plan_file_name, mcp_client))
         elif prompt_content:
             # Normal execution
-            asyncio.run(run_query(prompt_content))
+            asyncio.run(run_query(prompt_content, mcp_client))
         else:
              parser.print_help() # Print help if no prompt or file is provided
     # --- END of MODIFIED logic ---
