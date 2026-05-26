@@ -283,6 +283,7 @@ def load_config(config_path: str) -> Dict[str, Any]:
         "stream": False,        # Default: non-streaming mode
         "show_thinking": True,  # Default: show thinking content
         "use_tools": True,      # Default: enable tool calling
+        "default_model": "gemini_flash",  # Default model alias
     }
 
     if not os.path.exists(config_path):
@@ -304,8 +305,8 @@ def load_config(config_path: str) -> Dict[str, Any]:
         if "mcp" in user_config:
             config["mcp"] = user_config["mcp"]
 
-        # Merge top-level settings (stream, show_thinking, use_tools)
-        for key in ["stream", "show_thinking", "use_tools"]:
+        # Merge top-level settings (stream, show_thinking, use_tools, default_model)
+        for key in ["stream", "show_thinking", "use_tools", "default_model"]:
             if key in user_config:
                 config[key] = user_config[key]
 
@@ -376,8 +377,9 @@ async def execute_plan_steps(
     """
 
     # --- CONFIG RETRIEVAL FOR EXEC PLAN ---
-    model_alias = CONFIG.get("current_model_alias", "gemini_flash")
-    model_config = CONFIG["models"].get(model_alias, CONFIG["models"]["gemini_flash"])
+    default_model = CONFIG.get("default_model", "gemini_flash")
+    model_alias = CONFIG.get("current_model_alias", default_model)
+    model_config = CONFIG["models"].get(model_alias, CONFIG["models"].get(default_model, CONFIG["models"]["gemini_flash"]))
     model_name = model_config["name"]
     temperature = model_config["temperature"]
     # Get streaming and thinking settings
@@ -721,8 +723,9 @@ async def run_query(prompt_content: str, mcp_client):
         return
 
     # --- CONFIG RETRIEVAL ---
-    model_alias = CONFIG.get("current_model_alias", "gemini_flash")
-    model_config = CONFIG["models"].get(model_alias, CONFIG["models"]["gemini_flash"])
+    default_model = CONFIG.get("default_model", "gemini_flash")
+    model_alias = CONFIG.get("current_model_alias", default_model)
+    model_config = CONFIG["models"].get(model_alias, CONFIG["models"].get(default_model, CONFIG["models"]["gemini_flash"]))
     model_name = model_config["name"]
     temperature = model_config["temperature"]
     top_k = model_config["top_k"]
@@ -906,8 +909,9 @@ async def run_plan_query(prompt_content: str, plan_file: str, mcp_client):
         return
 
     # --- CONFIG RETRIEVAL ---
-    model_alias = CONFIG.get("current_model_alias", "gemini_flash")
-    model_config = CONFIG["models"].get(model_alias, CONFIG["models"]["gemini_flash"])
+    default_model = CONFIG.get("default_model", "gemini_flash")
+    model_alias = CONFIG.get("current_model_alias", default_model)
+    model_config = CONFIG["models"].get(model_alias, CONFIG["models"].get(default_model, CONFIG["models"]["gemini_flash"]))
     model_name = model_config["name"]
     temperature = model_config["temperature"]
     # Get streaming and thinking settings
@@ -1024,8 +1028,9 @@ async def run_handprint_query(prompt_content: str, mcp_client):
         return
 
     # --- CONFIG RETRIEVAL ---
-    model_alias = CONFIG.get("current_model_alias", "gemini_flash")
-    model_config = CONFIG["models"].get(model_alias, CONFIG["models"]["gemini_flash"])
+    default_model = CONFIG.get("default_model", "gemini_flash")
+    model_alias = CONFIG.get("current_model_alias", default_model)
+    model_config = CONFIG["models"].get(model_alias, CONFIG["models"].get(default_model, CONFIG["models"]["gemini_flash"]))
     model_name = model_config["name"]
     temperature = model_config["temperature"]
     top_k = model_config["top_k"]
@@ -1209,8 +1214,8 @@ def main():
     parser.add_argument(
         "--model",
         type=str,
-        default="gemini_flash", # Default alias
-        help="Alias of the model to use, as defined in the [models] section of the config file (default: gemini_flash).",
+        default=None, # Will use config's default_model
+        help="Alias of the model to use, as defined in the [models] section of the config file (default: from config.toml default_model).",
     )
 
     
@@ -1265,13 +1270,17 @@ def main():
     CONFIG = load_config(args.config)
 
     
-    if args.model not in CONFIG["models"]:
-        print(f"Error: Model alias '{args.model}' not found in the config file.", file=sys.stderr)
+    # Use default_model from config if no model specified via CLI
+    default_model = CONFIG.get("default_model", "gemini_flash")
+    selected_model = args.model if args.model is not None else default_model
+    
+    if selected_model not in CONFIG["models"]:
+        print(f"Error: Model alias '{selected_model}' not found in the config file.", file=sys.stderr)
         print(f"Available models: {', '.join(CONFIG['models'].keys())}", file=sys.stderr)
         sys.exit(1)
         
     # Store the selected model alias for use in model client creation
-    CONFIG["current_model_alias"] = args.model
+    CONFIG["current_model_alias"] = selected_model
     
     # Store streaming, thinking, and tools settings
     # CLI args take precedence over config, None means use config default
@@ -1280,8 +1289,6 @@ def main():
     CONFIG["use_tools"] = args.tools if args.tools is not None else CONFIG.get("use_tools", True)
     # --- END MODIFIED: Load Configuration ---
 
-
-    CONFIG["current_model_alias"] = args.model
 
     # Dynamic MCP Initialization
     server_path = "./mcp_command_server_enh.py"

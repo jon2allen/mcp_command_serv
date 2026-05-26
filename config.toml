@@ -5,6 +5,9 @@ stream = false        # Enable streaming responses (default: false)
 show_thinking = true # Display thinking/reasoning content (default: true)
 use_tools = true      # Enable tool calling (default: true)
 
+# Default Model Settings
+default_model = "mistral_1"  # Default model alias to use when none specified
+
 [command_blocking]
 # List of command substrings that will be blocked if found in the user's input command.
 prohibited_commands = [

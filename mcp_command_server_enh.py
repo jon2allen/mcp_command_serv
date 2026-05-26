@@ -29,7 +29,7 @@ from fastmcp.server.elicitation import (
 # --- Logging setup (from template) ---
 LOG_FILE = "mcp_command_server.log"
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(sys.stderr), # Log to stderr for visibility
