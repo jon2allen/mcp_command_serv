@@ -69,6 +69,194 @@ def get_openai_client(model_alias: str) -> openai.AsyncOpenAI:
 # --- END MODIFIED FUNCTION ---
 
 
+# --- NEW FUNCTION: Stream response with thinking display ---
+async def stream_completion_with_thinking(
+    client: openai.AsyncOpenAI,
+    model_name: str,
+    messages: List[Dict[str, Any]],
+    temperature: float,
+    show_thinking: bool = True,
+    extra_kwargs: Optional[Dict[str, Any]] = None
+) -> str:
+    """
+    Execute a streaming chat completion with support for displaying thinking/reasoning content.
+    
+    Args:
+        client: OpenAI Async client
+        model_name: Name of the model to use
+        messages: List of message dicts
+        temperature: Temperature setting
+        show_thinking: Whether to display thinking content
+        extra_kwargs: Additional kwargs for the completion call
+    
+    Returns:
+        Full response text (without thinking blocks)
+    """
+    kwargs = {
+        "model": model_name,
+        "messages": messages,
+        "temperature": temperature,
+        "stream": True,
+    }
+    if extra_kwargs:
+        kwargs.update(extra_kwargs)
+    
+    full_response = ""
+    in_think_block = False
+    buffer = ""
+    
+    try:
+        response = await client.chat.completions.create(**kwargs)
+        
+        async for chunk in response:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            
+            # Handle reasoning content (from OpenAI, Mistral, etc.)
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning is None:
+                reasoning = getattr(delta, "reasoning", None)
+            
+            if reasoning:
+                if show_thinking:
+                    # Check for structured reasoning (Mistral's format)
+                    if isinstance(reasoning, list):
+                        for item in reasoning:
+                            if isinstance(item, dict):
+                                if item.get("type") == "thinking":
+                                    thinking_text = item.get("thinking", "")
+                                    if isinstance(thinking_text, str):
+                                        print(f"\033[90m{thinking_text}\033[0m", end="", flush=True)
+                                        full_response += thinking_text
+                                    elif isinstance(thinking_text, list):
+                                        for t in thinking_text:
+                                            if isinstance(t, dict):
+                                                text = t.get("text", "")
+                                                print(f"\033[90m{text}\033[0m", end="", flush=True)
+                                                full_response += text
+                                elif item.get("type") == "text":
+                                    full_response += item.get("text", "")
+                                    print(item.get("text", ""), end="", flush=True)
+                    else:
+                        # Plain text reasoning
+                        print(f"\033[90m{reasoning}\033[0m", end="", flush=True)
+                        full_response += reasoning
+                else:
+                    full_response += reasoning
+                continue
+            
+            # Handle regular content
+            if delta.content:
+                content = delta.content
+                full_response += content
+                
+                # Handle <think> / <thought> HTML tags
+                buffer += content
+                while buffer:
+                    if not in_think_block:
+                        think_idx = buffer.find("<think>")
+                        thought_idx = buffer.find("<thought>")
+                        
+                        if think_idx != -1 or thought_idx != -1:
+                            if think_idx != -1 and thought_idx != -1:
+                                opening_idx = min(think_idx, thought_idx)
+                                opening_tag = "think" if think_idx < thought_idx else "thought"
+                            elif think_idx != -1:
+                                opening_idx = think_idx
+                                opening_tag = "think"
+                            else:
+                                opening_idx = thought_idx
+                                opening_tag = "thought"
+                            
+                            # Print content before the tag
+                            before_tag = buffer[:opening_idx]
+                            if before_tag:
+                                print(before_tag, end="", flush=True)
+                            
+                            # Print opening tag in gray
+                            if show_thinking:
+                                print(f"\033[90m<{opening_tag}>\033[0m", end="", flush=True)
+                            
+                            buffer = buffer[opening_idx + len(f"<{opening_tag}>") :]
+                            in_think_block = True
+                        else:
+                            # No tags, print all
+                            print(buffer, end="", flush=True)
+                            buffer = ""
+                    else:
+                        # Look for closing tag
+                        end_think_idx = buffer.find("</think>")
+                        end_thought_idx = buffer.find("</thought>")
+                        
+                        if end_think_idx != -1 or end_thought_idx != -1:
+                            if end_think_idx != -1 and end_thought_idx != -1:
+                                closing_idx = min(end_think_idx, end_thought_idx)
+                                closing_tag = "think" if end_think_idx < end_thought_idx else "thought"
+                            elif end_think_idx != -1:
+                                closing_idx = end_think_idx
+                                closing_tag = "think"
+                            else:
+                                closing_idx = end_thought_idx
+                                closing_tag = "thought"
+                            
+                            # Print content inside the tag in gray
+                            inside = buffer[:closing_idx]
+                            if show_thinking:
+                                print(f"\033[90m{inside}\033[0m", end="", flush=True)
+                            
+                            # Print closing tag in gray
+                            if show_thinking:
+                                print(f"\033[90m</{closing_tag}>\033[0m", end="", flush=True)
+                            
+                            buffer = buffer[closing_idx + len(f"</{closing_tag}>") :]
+                            in_think_block = False
+                        else:
+                            # Partial content, might be more coming
+                            print(buffer, end="", flush=True)
+                            buffer = ""
+            
+        print()  # Final newline
+        return full_response
+        
+    except Exception as e:
+        print(f"\nError in streaming: {e}", file=sys.stderr)
+        return full_response
+
+# --- END NEW FUNCTION ---
+
+
+# --- NEW FUNCTION: Process thinking blocks in non-streaming response ---
+def process_thinking_blocks(content: str, show_thinking: bool = True) -> str:
+    """
+    Process thinking blocks (<think>, <thought>) in a non-streaming response.
+    
+    Args:
+        content: The response text
+        show_thinking: Whether to display thinking content
+    
+    Returns:
+        Processed text with thinking blocks colored or removed
+    """
+    import re
+    
+    if not show_thinking:
+        # Remove all thinking blocks
+        content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
+        content = re.sub(r'<thought>.*?</thought>', '', content, flags=re.DOTALL)
+        return content
+    
+    # Color thinking blocks gray
+    def color_think(match):
+        return f"\033[90m{match.group(0)}\033[0m"
+    
+    content = re.sub(r'<think>.*?</think>', color_think, content, flags=re.DOTALL)
+    content = re.sub(r'<thought>.*?</thought>', color_think, content, flags=re.DOTALL)
+    return content
+
+# --- END NEW FUNCTION ---
+
+
 # --- MODIFIED FUNCTION: CONFIG LOADER (Added api_key field to defaults) ---
 def load_config(config_path: str) -> Dict[str, Any]:
     """
@@ -91,7 +279,10 @@ def load_config(config_path: str) -> Dict[str, Any]:
                 "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
                 "api_key": "LLM_API_KEY", # Default fallback
             },
-        }
+        },
+        "stream": False,        # Default: non-streaming mode
+        "show_thinking": True,  # Default: show thinking content
+        "use_tools": True,      # Default: enable tool calling
     }
 
     if not os.path.exists(config_path):
@@ -112,6 +303,11 @@ def load_config(config_path: str) -> Dict[str, Any]:
 
         if "mcp" in user_config:
             config["mcp"] = user_config["mcp"]
+
+        # Merge top-level settings (stream, show_thinking, use_tools)
+        for key in ["stream", "show_thinking", "use_tools"]:
+            if key in user_config:
+                config[key] = user_config[key]
 
         return config
 
@@ -184,6 +380,9 @@ async def execute_plan_steps(
     model_config = CONFIG["models"].get(model_alias, CONFIG["models"]["gemini_flash"])
     model_name = model_config["name"]
     temperature = model_config["temperature"]
+    # Get streaming and thinking settings
+    use_streaming = CONFIG.get("stream", False)
+    show_thinking = CONFIG.get("show_thinking", True)
     # --- END CONFIG RETRIEVAL ---
     
     # --- MODIFIED: Create dynamic client ---
@@ -254,15 +453,30 @@ async def execute_plan_steps(
                 "if tool call resulted in an error print ***ERROR***"  
             )
 
-            # --- MODIFIED: Use OpenAI Chat Completion and dynamic client ---
+            # --- MODIFIED: Use OpenAI Chat Completion with streaming support ---
             async with client:
-                step_response_obj = await llm_client.chat.completions.create(
-                    model=model_name,
-                    messages=[{"role": "user", "content": step_prompt_content}],
-                    temperature=temperature,
-                    # Note: top_k is often managed by temperature in OpenAI, or uses top_p/max_tokens
-                )
-                step_response = step_response_obj.choices[0].message.content or ""
+                if use_streaming:
+                    print("Assistant: ", end="", flush=True)
+                    step_response = await stream_completion_with_thinking(
+                        client=llm_client,
+                        model_name=model_name,
+                        messages=[{"role": "user", "content": step_prompt_content}],
+                        temperature=temperature,
+                        show_thinking=show_thinking,
+                    )
+                    print()  # Newline after streaming
+                else:
+                    step_response_obj = await llm_client.chat.completions.create(
+                        model=model_name,
+                        messages=[{"role": "user", "content": step_prompt_content}],
+                        temperature=temperature,
+                        # Note: top_k is often managed by temperature in OpenAI, or uses top_p/max_tokens
+                    )
+                    step_response = step_response_obj.choices[0].message.content or ""
+                    
+                    # Process thinking blocks for non-streaming
+                    if show_thinking:
+                        step_response = process_thinking_blocks(step_response, show_thinking)
             # print("step_prompt_content: ", step_prompt_content )
             print("step response: ", step_response )
             # --- END MODIFIED ---
@@ -524,77 +738,123 @@ async def run_query(prompt_content: str, mcp_client):
 
     try:
         async with mcp_client:
-
-            # 1. Fetch available tools from the MCP server
-            tool_list = await mcp_client.list_tools()
-        
-            # 2. Convert MCP tools to OpenAI tool format
-            openai_tools = []
-            for tool in tool_list:
-                 openai_tools.append({
-                    "type": "function",
-                    "function": {
-                         "name": tool.name,
-                         "description": tool.description,
-                         "parameters": tool.inputSchema
-                         }
-                 })
-
             # --- MODIFIED: History initialization and Loop ---
             messages = [{"role": "user", "content": prompt_content}]
+            
+            # Get streaming, thinking, and tools settings from config
+            use_streaming = CONFIG.get("stream", False)
+            show_thinking = CONFIG.get("show_thinking", True)
+            use_tools = CONFIG.get("use_tools", True)
+            
+            # Build tools list based on use_tools setting
+            if use_tools:
+                # Fetch available tools from the MCP server
+                tool_list = await mcp_client.list_tools()
+                
+                # Convert MCP tools to OpenAI tool format
+                openai_tools = []
+                for tool in tool_list:
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": tool.name,
+                            "description": tool.description,
+                            "parameters": tool.inputSchema
+                        }
+                    })
+            else:
+                openai_tools = []
 
             while True:
-                response_obj = await llm_client.chat.completions.create(
-                    model=model_name,
-                    messages=messages, # Use dynamic history
-                    temperature=temperature,
-                    tools=openai_tools,
-                    tool_choice="auto",
-                    extra_headers={"x-google-top-k": str(top_k)} if 'gemini' in model_name.lower() else {},
-                )
-
-                message = response_obj.choices[0].message
-                messages.append(message) # Feature 2: Keep history of response
-
-                if message.tool_calls:
-                    # Feature 1: Loop on tool output
-                    for tool_call in message.tool_calls:
-                         # Parse arguments from JSON string to dict
-                         tool_args = json.loads(tool_call.function.arguments)
-                         
-                         print(f"--- Tool Call: {tool_call.function.name} ---")
-                         
-                         # Execute tool via router
-                         tool_response = await mcp_router(
-                            tool_name=tool_call.function.name,
-                            parameters=tool_args,
-                            mcp_client=mcp_client
-                        )
-                         
-                         # Feature 2: Append tool result to history
-                         messages.append({
-                             "role": "tool",
-                             "tool_call_id": tool_call.id,
-                             "content": str(tool_response)
-                         })
-                    # Loop continues here to redrive the prompt with new history
-                
-                else:
-                    # Feature 3: Print response when not tool (Final Answer)
-                    if message.content:
-                        print("--- Response ---")
-                        print(message.content)
-                        print("----------------")
-                        
-                        if response_obj.usage:
-                            print("--- Token Usage ---")
-                            print(f"Input Tokens:  {response_obj.usage.prompt_tokens}")
-                            print(f"Output Tokens: {response_obj.usage.completion_tokens}")
-                            print(f"Total Tokens:  {response_obj.usage.total_tokens}")
-                            print("-------------------")
+                # For tool calls, we need non-streaming to get tool_call_ids
+                # For final answers, we can use streaming if enabled
+                if use_streaming and not openai_tools:
+                    # No tools, use streaming
+                    print("Assistant: ", end="", flush=True)
+                    full_response = await stream_completion_with_thinking(
+                        client=llm_client,
+                        model_name=model_name,
+                        messages=messages,
+                        temperature=temperature,
+                        show_thinking=show_thinking,
+                        extra_kwargs={"extra_headers": {"x-google-top-k": str(top_k)} if 'gemini' in model_name.lower() else {}}
+                    )
+                    message_content = full_response
+                    # Create a message object for history
+                    message = {"role": "assistant", "content": message_content}
+                    messages.append(message)
                     
-                    # Break the loop as we have a final text response
-                    break
+                    if message_content:
+                        print()  # Ensure newline after streaming
+                        
+                        # Note: Token usage not available in streaming mode
+                        # Would need to call with stream=False to get usage
+                     
+                    break  # Streaming without tools means this is the final response
+                else:
+                    # Use non-streaming (for tools or when streaming disabled)
+                    if use_streaming:
+                        # Streaming requested but tools are enabled - fall back to non-streaming
+                        print("Note: Streaming disabled for tool calls (requires non-streaming mode)")
+                    
+                    response_obj = await llm_client.chat.completions.create(
+                        model=model_name,
+                        messages=messages, # Use dynamic history
+                        temperature=temperature,
+                        tools=openai_tools,
+                        tool_choice="auto",
+                        extra_headers={"x-google-top-k": str(top_k)} if 'gemini' in model_name.lower() else {},
+                    )
+
+                    message = response_obj.choices[0].message
+                    messages.append(message) # Feature 2: Keep history of response
+
+                    if message.tool_calls:
+                        # Feature 1: Loop on tool output
+                        for tool_call in message.tool_calls:
+                             # Parse arguments from JSON string to dict
+                             tool_args = json.loads(tool_call.function.arguments)
+                             
+                             print(f"--- Tool Call: {tool_call.function.name} ---")
+                             
+                             # Execute tool via router
+                             tool_response = await mcp_router(
+                                tool_name=tool_call.function.name,
+                                parameters=tool_args,
+                                mcp_client=mcp_client
+                            )
+                             
+                             # Feature 2: Append tool result to history
+                             messages.append({
+                                 "role": "tool",
+                                 "tool_call_id": tool_call.id,
+                                 "content": str(tool_response)
+                             })
+                        # Loop continues here to redrive the prompt with new history
+                    
+                    else:
+                        # Feature 3: Print response when not tool (Final Answer)
+                        if message.content:
+                            if show_thinking:
+                                # Process thinking blocks in the response
+                                processed = process_thinking_blocks(message.content, show_thinking)
+                                print("--- Response ---")
+                                print(processed)
+                                print("----------------")
+                            else:
+                                print("--- Response ---")
+                                print(message.content)
+                                print("----------------")
+                            
+                            if response_obj.usage:
+                                print("--- Token Usage ---")
+                                print(f"Input Tokens:  {response_obj.usage.prompt_tokens}")
+                                print(f"Output Tokens: {response_obj.usage.completion_tokens}")
+                                print(f"Total Tokens:  {response_obj.usage.total_tokens}")
+                                print("-------------------")
+                        
+                        # Break the loop as we have a final text response
+                        break
             # --- END MODIFIED ---
 
     except Exception as e:
@@ -650,6 +910,9 @@ async def run_plan_query(prompt_content: str, plan_file: str, mcp_client):
     model_config = CONFIG["models"].get(model_alias, CONFIG["models"]["gemini_flash"])
     model_name = model_config["name"]
     temperature = model_config["temperature"]
+    # Get streaming and thinking settings
+    use_streaming = CONFIG.get("stream", False)
+    show_thinking = CONFIG.get("show_thinking", True)
     # --- END CONFIG RETRIEVAL ---
     
     # --- MODIFIED: Create dynamic client ---
@@ -693,16 +956,34 @@ async def run_plan_query(prompt_content: str, plan_file: str, mcp_client):
 
     try:
         async with mcp_client:
-            # --- MODIFIED: Use OpenAI Chat Completion for plan generation ---
-            response_obj = await llm_client.chat.completions.create(
-                model=model_name,
-                messages=[{"role": "user", "content": plan_prompt_content}],
-                temperature=temperature,
-                # Tools are typically omitted for plan generation to enforce JSON output
-            )
+            # --- MODIFIED: Use OpenAI Chat Completion with streaming support ---
+            if use_streaming:
+                # For plan generation, we need the full response for JSON parsing
+                # So we buffer the stream but still display thinking
+                print("Generating plan...", end="", flush=True)
+                plan_response = await stream_completion_with_thinking(
+                    client=llm_client,
+                    model_name=model_name,
+                    messages=[{"role": "user", "content": plan_prompt_content}],
+                    temperature=temperature,
+                    show_thinking=show_thinking,
+                )
+                print()  # Newline
+                plan_json_string = remove_json_literal_wrapper(plan_response.strip())
+            else:
+                response_obj = await llm_client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": plan_prompt_content}],
+                    temperature=temperature,
+                    # Tools are typically omitted for plan generation to enforce JSON output
+                )
+                # Process thinking blocks for non-streaming
+                plan_json_string = remove_json_literal_wrapper(response_obj.choices[0].message.content.strip())
+                if show_thinking:
+                    plan_json_string = process_thinking_blocks(plan_json_string, show_thinking)
             # --- END MODIFIED ---
             
-            plan_json_string =  remove_json_literal_wrapper(response_obj.choices[0].message.content.strip())
+            plan_json_string = plan_json_string  # Already set above
             
             # Sanity check and parse the JSON
             try:
@@ -748,6 +1029,9 @@ async def run_handprint_query(prompt_content: str, mcp_client):
     model_name = model_config["name"]
     temperature = model_config["temperature"]
     top_k = model_config["top_k"]
+    # Get streaming and thinking settings
+    use_streaming = CONFIG.get("stream", False)
+    show_thinking = CONFIG.get("show_thinking", True)
     # --- END CONFIG RETRIEVAL ---
 
     try:
@@ -786,17 +1070,37 @@ async def run_handprint_query(prompt_content: str, mcp_client):
 
             while True:
                 # 4. Call LLM (No native tools)
-                response_obj = await llm_client.chat.completions.create(
-                    model=model_name,
-                    messages=messages,
-                    temperature=temperature,
-                    extra_headers={"x-google-top-k": str(top_k)} if 'gemini' in model_name.lower() else {},
-                )
+                # Use streaming if enabled and no native tools (text-based tool calls work with streaming)
+                if use_streaming:
+                    print("Assistant: ", end="", flush=True)
+                    full_content = await stream_completion_with_thinking(
+                        client=llm_client,
+                        model_name=model_name,
+                        messages=messages,
+                        temperature=temperature,
+                        show_thinking=show_thinking,
+                        extra_kwargs={"extra_headers": {"x-google-top-k": str(top_k)} if 'gemini' in model_name.lower() else {}}
+                    )
+                    print()  # Newline
+                    content = full_content
+                    # Create message for history
+                    message = {"role": "assistant", "content": content}
+                    messages.append(message)
+                else:
+                    response_obj = await llm_client.chat.completions.create(
+                        model=model_name,
+                        messages=messages,
+                        temperature=temperature,
+                        extra_headers={"x-google-top-k": str(top_k)} if 'gemini' in model_name.lower() else {},
+                    )
 
-                message = response_obj.choices[0].message
-                messages.append(message) # Add Assistant Response to History
-                
-                content = message.content or ""
+                    message = response_obj.choices[0].message
+                    messages.append(message) # Add Assistant Response to History
+                    
+                    content = message.content or ""
+                    # Process thinking blocks for non-streaming
+                    if show_thinking:
+                        content = process_thinking_blocks(content, show_thinking)
                 
                 # 5. Check for JSON Tool Call in text response
                 tool_to_execute = None
@@ -910,6 +1214,47 @@ def main():
     )
 
     
+    # --- NEW: Streaming and Thinking Display Options ---
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Enable streaming responses for real-time output."
+    )
+    parser.add_argument(
+        "--no-stream",
+        dest="stream",
+        action="store_false",
+        help="Disable streaming responses (use non-streaming mode)."
+    )
+    parser.set_defaults(stream=None)
+    
+    parser.add_argument(
+        "--thinking",
+        action="store_true",
+        help="Display thinking/reasoning content from the model (if available)."
+    )
+    parser.add_argument(
+        "--no-thinking",
+        dest="thinking",
+        action="store_false",
+        help="Hide thinking/reasoning content from the model."
+    )
+    parser.set_defaults(thinking=None)
+    
+    parser.add_argument(
+        "--tools",
+        action="store_true",
+        help="Enable tool calling (default: enabled)."
+    )
+    parser.add_argument(
+        "--no-tools",
+        dest="tools",
+        action="store_false",
+        help="Disable tool calling to enable streaming mode."
+    )
+    parser.set_defaults(tools=None)
+    # --- END NEW ---
+    
     parser.add_argument("--mcp", type=str, help="Alias of the MCP server to use, as defined in the [mcp] section of the config file.")
     # --- END NEW ARGUMENTS ---
 
@@ -927,6 +1272,12 @@ def main():
         
     # Store the selected model alias for use in model client creation
     CONFIG["current_model_alias"] = args.model
+    
+    # Store streaming, thinking, and tools settings
+    # CLI args take precedence over config, None means use config default
+    CONFIG["stream"] = args.stream if args.stream is not None else CONFIG.get("stream", False)
+    CONFIG["show_thinking"] = args.thinking if args.thinking is not None else CONFIG.get("show_thinking", True)
+    CONFIG["use_tools"] = args.tools if args.tools is not None else CONFIG.get("use_tools", True)
     # --- END MODIFIED: Load Configuration ---
 
 
