@@ -110,4 +110,18 @@ temperature = 0.7
 base_url = "https://api.publicai.co/v1"
 api_key = "SWISS_API_KEY"
 
+[models.prism_bonsai]
+name = "prism-ml/Bonsai-8B-gguf:Q1_0"
+temperature = 0.2
+top_k = 20 
+base_url = "http://localhost:8080/v1"
+api_key = "OLLAMA"
+
+[models.gemma_4_IQ]
+name = "unsloth/gemma-4-E4B-it-GGUF:IQ2_M"
+temperature = 0.2
+top_k = 20 
+base_url = "http://localhost:8080/v1"
+api_key = "OLLAMA"
+
 # If override set to True, all command restrictions are ignored and execution is permitted.

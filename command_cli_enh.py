@@ -47,14 +47,20 @@ def get_openai_client(model_alias: str) -> openai.AsyncOpenAI:
     # 2. Get the actual API key value from the environment
     api_key = os.environ.get(env_var_name)
     
+    # Bypass strict API key requirement for local models (llama.cpp, Ollama)
+    base_url = model_config.get("base_url", "")
     if not api_key:
-        raise ValueError(
-            f"API key not found for model alias '{model_alias}'. "
-            f"Please set the '{env_var_name}' environment variable."
-        )
-
-    # base_url is read from config
-    base_url = model_config.get("base_url")
+        if (
+            env_var_name.upper() in ["OLLAMA", "NONE", "DUMMY", "LOCAL"]
+            or "localhost" in base_url
+            or "127.0.0.1" in base_url
+        ):
+            api_key = "dummy-key-for-local"
+        else:
+            raise ValueError(
+                f"API key not found for model alias '{model_alias}'. "
+                f"Please set the '{env_var_name}' environment variable."
+            )
 
     return openai.AsyncOpenAI(
         api_key=api_key,
