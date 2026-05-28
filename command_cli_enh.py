@@ -226,6 +226,29 @@ async def stream_completion_with_thinking(
 # --- END NEW FUNCTION ---
 
 
+# --- NEW FUNCTION: Strip thinking blocks for JSON parsing ---
+def strip_thinking_blocks(content: str) -> str:
+    """
+    Remove all thinking blocks (<think>, <thought>) from content for JSON parsing.
+    
+    Args:
+        content: The response text that may contain thinking blocks
+    
+    Returns:
+        Text with all thinking blocks completely removed
+    """
+    import re
+    # Remove all thinking blocks regardless of content
+    content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
+    content = re.sub(r'<thought>.*?</thought>', '', content, flags=re.DOTALL)
+    # Also remove any remaining reasoning content markers
+    content = re.sub(r'<think>', '', content)
+    content = re.sub(r'</think>', '', content)
+    content = re.sub(r'<thought>', '', content)
+    content = re.sub(r'</thought>', '', content)
+    return content
+
+
 # --- NEW FUNCTION: Process thinking blocks in non-streaming response ---
 def process_thinking_blocks(content: str, show_thinking: bool = True) -> str:
     """
@@ -1007,7 +1030,7 @@ async def run_plan_query(prompt_content: str, plan_file: str, mcp_client):
             print(f"Plan successfully generated and saved to **{plan_file}**")
             
             # --- Token Count Display ---
-            if response_obj.usage:
+            if not use_streaming and 'response_obj' in locals() and response_obj and response_obj.usage:
                 print("--- Token Usage ---")
                 print(f"Input Tokens:  {response_obj.usage.prompt_tokens}")
                 print(f"Output Tokens: {response_obj.usage.completion_tokens}")
@@ -1111,8 +1134,10 @@ async def run_handprint_query(prompt_content: str, mcp_client):
                 tool_to_execute = None
                 
                 # Attempt to extract JSON from the text
+                # Use a cleaned copy for JSON parsing to handle thinking blocks
+                content_for_json = strip_thinking_blocks(content)
                 try:
-                    cleaned_content = remove_json_literal_wrapper(content)
+                    cleaned_content = remove_json_literal_wrapper(content_for_json)
                     print("cleaned: \n", cleaned_content )
                     # Simple heuristic: if it looks like a JSON object with 'tool' key
                     if "{" in cleaned_content and "tool" in cleaned_content:
@@ -1150,7 +1175,7 @@ async def run_handprint_query(prompt_content: str, mcp_client):
                     print(content)
                     print("----------------")
 
-                    if response_obj.usage:
+                    if not use_streaming and response_obj and response_obj.usage:
                         print("--- Token Usage ---")
                         print(f"Input Tokens:  {response_obj.usage.prompt_tokens}")
                         print(f"Output Tokens: {response_obj.usage.completion_tokens}")

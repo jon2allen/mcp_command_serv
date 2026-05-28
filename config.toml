@@ -66,6 +66,14 @@ top_k = 1
 base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
 api_key = "GEMINI_API_KEY"
 
+[models.gemma_4]
+# Gemma 4 model using Google's OpenAI-compatible endpoint
+name = "gemma-4-26b-a4b-it"
+temperature = 0.2
+top_k = 1
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+api_key = "GEMINI_API_KEY"
+
 [models.openai_gpt4]
 # Example of a different vendor (OpenAI)
 name = "gpt-4o"
